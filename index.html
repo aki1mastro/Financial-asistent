@@ -8,12 +8,7 @@
 <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
-<div id="app">
-  <div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#64748b;font-size:16px">
-    ⏳ Подключение к базе данных...
-  </div>
-</div>
-
+<div id="app"><div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#64748b;font-size:16px">⏳ Подключение к базе данных...</div></div>
 <script type="module">
 import { initializeApp }       from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc }
@@ -28,16 +23,14 @@ const firebaseConfig = {
   appId: "1:702605526775:web:150d4038df8aa053dfb5f2"
 };
 
-// ── FIREBASE INIT ──────────────────────────────────────────────────────────
 const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
-const COL = 'expenses';
 
-// ── CONSTANTS ──────────────────────────────────────────────────────────────
 const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-const CATS = [
+
+const EXP_CATS = [
   {id:'food',     e:'🛒',n:'Продукты',       c:'#4ade80',k:['продукт','мясо','овощ','фрукт','хоз','барана','ас ','қонақ','құрт','ірімшік']},
-  {id:'cafe',     e:'☕',n:'Кафе/Рестораны',  c:'#fb923c',k:['кофе','кафе','ресторан','самса','пирожк','морожен','обед','ужин','донер','сендвич','квас','еда','напит']},
+  {id:'cafe',     e:'☕',n:'Кафе/Рестораны',  c:'#fb923c',k:['кофе','кафе','ресторан','самса','пирожк','морожен','обед','ужин','донер','сендвич','квас','еда','напит','orbit']},
   {id:'transport',e:'🚗',n:'Транспорт',       c:'#60a5fa',k:['такси','бензин','парковк','заправк','авто','паркинг']},
   {id:'housing',  e:'🏠',n:'Жильё/ЖКХ',      c:'#a78bfa',k:['коммунал','жкх','аренда','квартира','электр','тариф','билайн']},
   {id:'health',   e:'💊',n:'Здоровье',        c:'#f472b6',k:['аптека','врач','больниц','медицин','лекарств','гигиен','зубн','стрижк','спа','баня']},
@@ -50,40 +43,49 @@ const CATS = [
   {id:'other',    e:'💼',n:'Прочее',           c:'#94a3b8',k:[]},
 ];
 
+const INC_CATS = [
+  {id:'salary',   e:'💼',n:'Зарплата',        c:'#4ade80'},
+  {id:'freelance',e:'💻',n:'Фриланс',         c:'#60a5fa'},
+  {id:'business', e:'🏢',n:'Бизнес',          c:'#fbbf24'},
+  {id:'invest',   e:'📈',n:'Инвестиции',      c:'#a78bfa'},
+  {id:'gift',     e:'🎁',n:'Подарок/Бонус',   c:'#f9a8d4'},
+  {id:'other_i',  e:'💰',n:'Прочее',          c:'#94a3b8'},
+];
+
 const fmt = n => new Intl.NumberFormat('ru-RU').format(Math.round(n));
 
 function guessCat(cat, note) {
   const t = ((cat||'') + ' ' + (note||'')).toLowerCase();
-  for (const c of CATS) { if (c.k.some(k => t.includes(k))) return c.id; }
+  for (const c of EXP_CATS) { if (c.k.some(k => t.includes(k))) return c.id; }
   return 'other';
 }
 function parseDate(s) {
   if (!s) return new Date(); s = s.trim();
   let m;
   m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return new Date(+m[1],+m[2]-1,+m[3]);
-  m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/); if (m) return new Date(+m[3],+m[2]-1,+m[1]);
+  m = s.match(/^(\d{2})\.(\d{2])\.(\d{4})/); if (m) return new Date(+m[3],+m[2]-1,+m[1]);
   const d = new Date(s); return isNaN(d) ? new Date() : d;
 }
-function detectBankFormat(text) {
-  const fl = text.split('\n').find(l => !l.startsWith('sep=') && l.trim());
+function detectBank(text) {
+  const fl = text.split('\n').find(l=>!l.startsWith('sep=')&&l.trim());
   return fl && /^(Расход|Доход|Expense|Income)/i.test(fl);
 }
 function parseBankCSV(text) {
   const lines = text.replace(/\r\n/g,'\n').split('\n').filter(l=>!l.startsWith('sep=')&&l.trim());
   const merged = [];
   for (const line of lines) {
-    if (/^(Расход|Доход|Expense|Income)/i.test(line) || !merged.length) merged.push(line);
-    else merged[merged.length-1] += ' ' + line.trim();
+    if (/^(Расход|Доход|Expense|Income)/i.test(line)||!merged.length) merged.push(line);
+    else merged[merged.length-1] += ' '+line.trim();
   }
   const rows = [];
   for (const line of merged) {
-    const p = line.split(','); if (p.length < 5) continue;
-    const type = p[0].trim(), dt = p[1].trim(), cat = p[2].trim();
+    const p = line.split(','); if (p.length<5) continue;
+    const type=p[0].trim(), dt=p[1].trim(), cat=p[2].trim();
     const amt = parseFloat((p[p.length-2]||'').trim().replace(/\s/g,''));
-    const desc = p.slice(3, p.length-2).join(',').trim();
-    if (!/^(Расход|Expense)/i.test(type) || !amt || amt <= 0) continue;
+    const desc = p.slice(3,p.length-2).join(',').trim();
+    if (!/^(Расход|Expense)/i.test(type)||!amt||amt<=0) continue;
     const d = parseDate(dt);
-    rows.push({ cat: guessCat(cat,desc), amt, note:[cat,desc].filter(Boolean).join(' — ').slice(0,80), date: d.toISOString(), monthKey:`${d.getFullYear()}-${d.getMonth()}` });
+    rows.push({cat:guessCat(cat,desc),amt,note:[cat,desc].filter(Boolean).join(' — ').slice(0,80),date:d.toISOString(),monthKey:`${d.getFullYear()}-${d.getMonth()}`});
   }
   return rows;
 }
@@ -93,216 +95,257 @@ function parseCSV(text) {
   const rows = [];
   for (let i=1;i<lines.length;i++) {
     if (!lines[i].trim()) continue;
-    const vals = lines[i].split(','); const obj = {};
-    headers.forEach((h,j) => { obj[h] = (vals[j]||'').trim(); }); rows.push(obj);
+    const vals=lines[i].split(','); const obj={};
+    headers.forEach((h,j)=>{obj[h]=(vals[j]||'').trim();}); rows.push(obj);
   }
-  return { headers, rows };
+  return {headers,rows};
 }
 
-// ── STATE ──────────────────────────────────────────────────────────────────
 const now = new Date();
 let S = {
-  data: {}, // { monthKey: [{id, cat, amt, note, date, firestoreId}] }
-  month: now.getMonth(),
-  year:  now.getFullYear(),
-  tab:   'expenses',
-  form:  { cat:'food', amt:'', note:'' },
-  csv:   { step:'idle', headers:[], rows:[], map:{date:'',amt:'',cat:'',note:''}, preview:[], info:'' },
-  analysis: '',
-  loading:  false,
-  syncing:  false,
+  expenses:{}, incomes:{},
+  month:now.getMonth(), year:now.getFullYear(),
+  tab:'expenses', subtab:'list',
+  expForm:{cat:'food',amt:'',note:''},
+  incForm:{cat:'salary',amt:'',note:''},
+  csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
+  analysis:'', loading:false, syncing:false,
 };
 
-function setState(patch) {
-  Object.assign(S, typeof patch === 'function' ? patch(S) : patch);
-  render();
-}
+function setState(p){Object.assign(S,typeof p==='function'?p(S):p);render();}
+function getExpCat(id){return EXP_CATS.find(c=>c.id===id)||EXP_CATS[EXP_CATS.length-1];}
+function getIncCat(id){return INC_CATS.find(c=>c.id===id)||INC_CATS[INC_CATS.length-1];}
+function mk(){return `${S.year}-${S.month}`;}
+function expData(){return S.expenses[mk()]||[];}
+function incData(){return S.incomes[mk()]||[];}
+function expTotals(){const t={};for(const x of expData())t[x.cat]=(t[x.cat]||0)+x.amt;return t;}
+function totalExp(){return Object.values(expTotals()).reduce((a,b)=>a+b,0);}
+function totalInc(){return (S.incomes[mk()]||[]).reduce((s,x)=>s+x.amt,0);}
+function balance(){return totalInc()-totalExp();}
 
-function getCat(id) { return CATS.find(c=>c.id===id) || CATS[CATS.length-1]; }
-function monthKey()  { return `${S.year}-${S.month}`; }
-function monthData() { return S.data[monthKey()] || []; }
-function totals()    { const t={}; for (const x of monthData()) t[x.cat]=(t[x.cat]||0)+x.amt; return t; }
-function totalSpent(){ return Object.values(totals()).reduce((a,b)=>a+b,0); }
-
-// ── FIRESTORE CRUD ─────────────────────────────────────────────────────────
-async function loadAllFromFirestore() {
+async function loadAll() {
   try {
-    const snap = await getDocs(collection(db, COL));
-    const newData = {};
-    snap.forEach(docSnap => {
-      const d = { ...docSnap.data(), firestoreId: docSnap.id };
-      const mk = d.monthKey;
-      if (!newData[mk]) newData[mk] = [];
-      newData[mk].push(d);
-    });
-    S.data = newData;
-    render();
-  } catch(e) {
-    console.error('Load error:', e);
-    alert('Ошибка загрузки данных: ' + e.message);
-  }
-}
-
-async function addToFirestore(entry) {
-  const { firestoreId, ...data } = entry;
-  const docRef = await addDoc(collection(db, COL), data);
-  return docRef.id;
-}
-
-async function deleteFromFirestore(firestoreId) {
-  await deleteDoc(doc(db, COL, firestoreId));
+    const [eSnap,iSnap] = await Promise.all([
+      getDocs(collection(db,'expenses')),
+      getDocs(collection(db,'incomes'))
+    ]);
+    const expenses={}, incomes={};
+    eSnap.forEach(d=>{const x={...d.data(),fid:d.id};if(!expenses[x.monthKey])expenses[x.monthKey]=[];expenses[x.monthKey].push(x);});
+    iSnap.forEach(d=>{const x={...d.data(),fid:d.id};if(!incomes[x.monthKey])incomes[x.monthKey]=[];incomes[x.monthKey].push(x);});
+    S.expenses=expenses; S.incomes=incomes; render();
+  } catch(e){alert('Ошибка Firebase: '+e.message);}
 }
 
 async function addExpense() {
-  const amt = Number(S.form.amt);
-  if (!amt || amt <= 0) return;
-  setState({ syncing: true });
-  const mk = monthKey();
-  const entry = { cat: S.form.cat, amt, note: S.form.note, date: new Date().toISOString(), monthKey: mk };
-  const firestoreId = await addToFirestore(entry);
-  entry.firestoreId = firestoreId;
-  S.data = { ...S.data, [mk]: [...(S.data[mk]||[]), entry] };
-  setState({ form: { ...S.form, amt:'', note:'' }, syncing: false });
+  const amt=Number(S.expForm.amt); if(!amt||amt<=0) return;
+  setState({syncing:true});
+  const entry={cat:S.expForm.cat,amt,note:S.expForm.note,date:new Date().toISOString(),monthKey:mk()};
+  const ref = await addDoc(collection(db,'expenses'),entry);
+  entry.fid=ref.id;
+  S.expenses={...S.expenses,[mk()]:[...(S.expenses[mk()]||[]),entry]};
+  setState({expForm:{...S.expForm,amt:'',note:''},syncing:false});
 }
 
-async function removeExpense(firestoreId) {
-  setState({ syncing: true });
-  await deleteFromFirestore(firestoreId);
-  const mk = monthKey();
-  S.data = { ...S.data, [mk]: S.data[mk].filter(e => e.firestoreId !== firestoreId) };
-  setState({ syncing: false });
+async function addIncome() {
+  const amt=Number(S.incForm.amt); if(!amt||amt<=0) return;
+  setState({syncing:true});
+  const entry={cat:S.incForm.cat,amt,note:S.incForm.note,date:new Date().toISOString(),monthKey:mk()};
+  const ref = await addDoc(collection(db,'incomes'),entry);
+  entry.fid=ref.id;
+  S.incomes={...S.incomes,[mk()]:[...(S.incomes[mk()]||[]),entry]};
+  setState({incForm:{...S.incForm,amt:'',note:''},syncing:false});
+}
+
+async function delExpense(fid) {
+  setState({syncing:true});
+  await deleteDoc(doc(db,'expenses',fid));
+  S.expenses={...S.expenses,[mk()]:S.expenses[mk()].filter(e=>e.fid!==fid)};
+  setState({syncing:false});
+}
+
+async function delIncome(fid) {
+  setState({syncing:true});
+  await deleteDoc(doc(db,'incomes',fid));
+  S.incomes={...S.incomes,[mk()]:S.incomes[mk()].filter(e=>e.fid!==fid)};
+  setState({syncing:false});
 }
 
 async function importCSV() {
-  setState({ syncing: true });
-  const entries = S.csv.preview;
-  for (const r of entries) {
-    const entry = { cat:r.cat, amt:r.amt, note:r.note, date:r.date, monthKey:r.mk };
-    const fid = await addToFirestore(entry);
-    entry.firestoreId = fid;
-    S.data = { ...S.data, [r.mk]: [...(S.data[r.mk]||[]), entry] };
+  setState({syncing:true});
+  for (const r of S.csv.preview) {
+    const entry={cat:r.cat,amt:r.amt,note:r.note,date:r.date,monthKey:r.mk};
+    const ref = await addDoc(collection(db,'expenses'),entry);
+    entry.fid=ref.id;
+    S.expenses={...S.expenses,[r.mk]:[...(S.expenses[r.mk]||[]),entry]};
   }
-  setState({ csv: { ...S.csv, step:'done' }, syncing: false });
-  setTimeout(() => setState({ csv: { ...S.csv, step:'idle' } }), 2500);
+  setState({csv:{...S.csv,step:'done'},syncing:false});
+  setTimeout(()=>setState({csv:{...S.csv,step:'idle'}}),2500);
 }
 
 function handleFile(file) {
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const text = e.target.result;
-    if (detectBankFormat(text)) {
-      const rows = parseBankCSV(text);
-      setState({ csv: { ...S.csv, step:'preview', preview:rows.map(r=>({...r,id:Math.random(),mk:r.monthKey})), info:`Банковский формат — ${rows.length} расходов` }});
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const text=e.target.result;
+    if(detectBank(text)){
+      const rows=parseBankCSV(text);
+      setState({csv:{...S.csv,step:'preview',preview:rows.map(r=>({...r,id:Math.random(),mk:r.monthKey})),info:`Банковский формат — ${rows.length} расходов`}});
     } else {
-      const { headers, rows } = parseCSV(text);
-      const lower = headers.map(h=>h.toLowerCase());
-      const find = kws => headers[lower.findIndex(h=>kws.some(k=>h.includes(k)))]||'';
-      setState({ csv: { ...S.csv, step:'mapping', headers, rows, info:`CSV — ${rows.length} строк`,
-        map:{ amt:find(['сумм','amount','стоим','цена']), date:find(['дата','date','время']), cat:find(['категор','category','тип']), note:find(['описан','note','заметк','назван','наименован','description','товар']) }
-      }});
+      const {headers,rows}=parseCSV(text);
+      const lower=headers.map(h=>h.toLowerCase());
+      const find=kws=>headers[lower.findIndex(h=>kws.some(k=>h.includes(k)))]||'';
+      setState({csv:{...S.csv,step:'mapping',headers,rows,info:`CSV — ${rows.length} строк`,
+        map:{amt:find(['сумм','amount','стоим','цена']),date:find(['дата','date','время']),cat:find(['категор','category','тип']),note:find(['описан','note','заметк','назван','наименован','description','товар'])}}});
     }
   };
-  reader.readAsText(file, 'utf-8');
+  reader.readAsText(file,'utf-8');
 }
 
 function buildPreview() {
-  const { rows, map } = S.csv;
-  const preview = rows.filter(r=>parseFloat((r[map.amt]||'').replace(/\s/g,'').replace(',','.'))||0).map(r=>{
-    const amt = parseFloat((r[map.amt]||'').replace(/\s/g,'').replace(',','.'))||0;
-    const rawCat = map.cat?r[map.cat]:'', note = map.note?r[map.note]:'';
-    const d = parseDate(map.date?r[map.date]:'');
-    const mk = `${d.getFullYear()}-${d.getMonth()}`;
-    return { id:Math.random(), date:d.toISOString(), mk, cat:guessCat(rawCat,note), amt, note:[rawCat,note].filter(Boolean).join(' — ').slice(0,80) };
+  const {rows,map}=S.csv;
+  const preview=rows.filter(r=>parseFloat((r[map.amt]||'').replace(/\s/g,'').replace(',','.'))||0).map(r=>{
+    const amt=parseFloat((r[map.amt]||'').replace(/\s/g,'').replace(',','.'))||0;
+    const rawCat=map.cat?r[map.cat]:'', note=map.note?r[map.note]:'';
+    const d=parseDate(map.date?r[map.date]:'');
+    return{id:Math.random(),date:d.toISOString(),mk:`${d.getFullYear()}-${d.getMonth()}`,cat:guessCat(rawCat,note),amt,note:[rawCat,note].filter(Boolean).join(' — ').slice(0,80)};
   });
-  setState({ csv: { ...S.csv, step:'preview', preview }});
+  setState({csv:{...S.csv,step:'preview',preview}});
 }
 
-// ── ANALYSIS ───────────────────────────────────────────────────────────────
 function doAnalysis() {
-  setState({ loading:true, analysis:'', tab:'analysis' });
-  setTimeout(() => {
-    const tot = totals(), total = totalSpent(), allKeys = Object.keys(S.data);
-    if (!allKeys.length && !total) { setState({ analysis:'Нет данных. Добавь расходы или импортируй CSV.', loading:false }); return; }
-    const L = [];
-    L.push(`📊 АНАЛИЗ: ${MONTHS[S.month]} ${S.year}`);
-    L.push(`Общие расходы: ${fmt(total)} тг`); L.push('');
-    if (total > 0) {
-      L.push('🔍 СТРУКТУРА РАСХОДОВ');
-      const sorted = CATS.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]);
-      sorted.forEach(c => L.push(`${c.e} ${c.n}: ${fmt(tot[c.id])} тг (${Math.round(tot[c.id]/total*100)}%)`));
+  setState({loading:true,analysis:'',tab:'analysis'});
+  setTimeout(()=>{
+    const tot=expTotals(), totalE=totalExp(), totalI=totalInc(), bal=balance();
+    const allExpKeys=Object.keys(S.expenses), allIncKeys=Object.keys(S.incomes);
+    const L=[];
+
+    L.push(`📊 ФИНАНСОВЫЙ АНАЛИЗ: ${MONTHS[S.month]} ${S.year}`);
+    L.push('');
+    L.push(`💵 Доходы:   ${fmt(totalI)} тг`);
+    L.push(`💸 Расходы:  ${fmt(totalE)} тг`);
+    L.push(`${bal>=0?'✅':'❌'} Баланс:   ${bal>=0?'+':''}${fmt(bal)} тг`);
+    if(totalI>0) L.push(`📊 Расходуешь ${Math.round(totalE/totalI*100)}% от дохода`);
+    L.push('');
+
+    // Норма сбережений
+    if(totalI>0){
+      const savePct=Math.round(bal/totalI*100);
+      L.push('💰 НОРМА СБЕРЕЖЕНИЙ');
+      if(savePct>=20) L.push(`✅ Откладываешь ${savePct}% — отлично! Норма от 20%.`);
+      else if(savePct>=10) L.push(`⚠️ Откладываешь ${savePct}% — неплохо, но стремись к 20%.`);
+      else if(savePct>0) L.push(`⚠️ Откладываешь только ${savePct}% — постарайся сократить расходы.`);
+      else L.push(`❌ Расходы превышают доходы на ${fmt(Math.abs(bal))} тг — срочно нужна оптимизация!`);
       L.push('');
+    }
+
+    // Структура расходов
+    if(totalE>0){
+      L.push('🔍 СТРУКТУРА РАСХОДОВ');
+      const sorted=EXP_CATS.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]);
+      sorted.forEach(c=>L.push(`${c.e} ${c.n}: ${fmt(tot[c.id])} тг (${Math.round(tot[c.id]/totalE*100)}%)`));
+      L.push('');
+
+      // Оценка
       L.push('⚡ ОЦЕНКА ПО НОРМАМ');
-      const norms = { food:30, cafe:10, transport:15, entertain:8, credit:30, gifts:10 };
-      let warn = false;
-      Object.entries(norms).forEach(([id,max]) => {
-        if (!tot[id]) return; const pct=Math.round(tot[id]/total*100); const c=getCat(id);
-        if (pct>max){L.push(`⚠️ ${c.n}: ${pct}% — выше нормы (до ${max}%)`);warn=true;}
+      const norms={food:30,cafe:10,transport:15,entertain:8,credit:30,gifts:10};
+      let warn=false;
+      Object.entries(norms).forEach(([id,max])=>{
+        if(!tot[id]) return;
+        const pct=Math.round(tot[id]/totalE*100);
+        const c=EXP_CATS.find(x=>x.id===id);
+        if(pct>max){L.push(`⚠️ ${c.n}: ${pct}% — выше нормы (до ${max}%)`);warn=true;}
         else L.push(`✅ ${c.n}: ${pct}% — в норме`);
       });
-      if (!warn) L.push('✅ Все категории в пределах нормы');
+      if(!warn) L.push('✅ Все категории в норме');
       L.push('');
-      L.push('💡 РЕКОМЕНДАЦИИ');
-      let n=1;
-      const sorted2 = CATS.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]);
-      if (tot.credit&&tot.credit/total>0.25) L.push(`${n++}. Кредиты — ${Math.round(tot.credit/total*100)}% бюджета. Рассмотри рефинансирование.`);
-      if (tot.cafe&&tot.cafe/total>0.1) L.push(`${n++}. Кафе: готовка дома сэкономит ~${fmt(Math.round(tot.cafe*0.4))} тг/мес.`);
-      if (tot.transport&&tot.transport/total>0.15) L.push(`${n++}. Транспорт: оптимизация маршрутов — ~${fmt(Math.round(tot.transport*0.3))} тг/мес.`);
-      if (tot.gifts&&tot.gifts/total>0.08) L.push(`${n++}. Подарки/She: ${fmt(tot.gifts)} тг — установи месячный лимит.`);
-      if (sorted2[0]&&n<=3) L.push(`${n++}. Топ: ${sorted2[0].n} (${fmt(tot[sorted2[0].id])} тг). −10% = ${fmt(Math.round(tot[sorted2[0].id]*0.1))} тг экономии.`);
-      L.push('');
-      const mTotals = allKeys.map(k=>{ const[y,m]=k.split('-'); return{label:`${MONTHS[+m].slice(0,3)} ${y}`,total:S.data[k].reduce((s,x)=>s+x.amt,0),key:k}; }).sort((a,b)=>a.key.localeCompare(b.key));
-      if (mTotals.length >= 2) {
-        L.push('📈 ТРЕНД ПО МЕСЯЦАМ');
-        mTotals.forEach(m => L.push(`${m.label}: ${fmt(m.total)} тг`));
-        const last=mTotals[mTotals.length-1].total, prev=mTotals[mTotals.length-2].total;
-        if (prev>0){const d=Math.round((last-prev)/prev*100);L.push(d>0?`▲ Рост на ${d}%`:`▼ Снижение на ${Math.abs(d)}% — хорошая динамика!`);}
-        L.push('');
-      }
-      L.push('🎯 БЮДЖЕТ НА СЛЕДУЮЩИЙ МЕСЯЦ');
-      const avg = allKeys.length ? Math.round(allKeys.reduce((s,k)=>s+S.data[k].reduce((a,x)=>a+x.amt,0),0)/allKeys.length) : total;
-      L.push(`Цель: ${fmt(Math.round(avg*0.9))} тг (−10% от среднего)`);
-      sorted2.slice(0,5).forEach(c => L.push(`  ${c.n}: до ${fmt(Math.round(tot[c.id]*0.9))} тг`));
     }
-    setState({ analysis: L.join('\n'), loading: false });
-  }, 400);
+
+    // Советы
+    L.push('💡 РЕКОМЕНДАЦИИ');
+    let n=1;
+    if(bal<0) L.push(`${n++}. Расходы выше доходов на ${fmt(Math.abs(bal))} тг. Найди статью для сокращения.`);
+    if(totalI>0&&bal/totalI<0.1&&bal>=0) L.push(`${n++}. Норма сбережений ниже 10%. Попробуй правило 50/30/20: 50% — нужды, 30% — желания, 20% — сбережения.`);
+    if(tot.credit&&tot.credit/totalE>0.25) L.push(`${n++}. Кредиты — ${Math.round(tot.credit/totalE*100)}% расходов. Рассмотри досрочное погашение.`);
+    if(tot.cafe&&tot.cafe/totalE>0.1) L.push(`${n++}. Кафе/рестораны: готовка дома сэкономит ~${fmt(Math.round(tot.cafe*0.4))} тг/мес.`);
+    if(totalI>0) L.push(`${n++}. Цель накоплений: откладывай минимум ${fmt(Math.round(totalI*0.2))} тг/мес (20% от дохода).`);
+    L.push('');
+
+    // Тренд
+    const allKeys=[...new Set([...allExpKeys,...allIncKeys])].sort();
+    if(allKeys.length>=2){
+      L.push('📈 ТРЕНД ПО МЕСЯЦАМ');
+      allKeys.forEach(k=>{
+        const [y,m]=k.split('-');
+        const e=(S.expenses[k]||[]).reduce((s,x)=>s+x.amt,0);
+        const i=(S.incomes[k]||[]).reduce((s,x)=>s+x.amt,0);
+        const b=i-e;
+        L.push(`${MONTHS[+m].slice(0,3)} ${y}: доход ${fmt(i)} / расход ${fmt(e)} / баланс ${b>=0?'+':''}${fmt(b)} тг`);
+      });
+      L.push('');
+    }
+
+    // Бюджет
+    L.push('🎯 ПЛАН НА СЛЕДУЮЩИЙ МЕСЯЦ');
+    const avgE=allExpKeys.length?Math.round(allExpKeys.reduce((s,k)=>s+(S.expenses[k]||[]).reduce((a,x)=>a+x.amt,0),0)/allExpKeys.length):totalE;
+    const avgI=allIncKeys.length?Math.round(allIncKeys.reduce((s,k)=>s+(S.incomes[k]||[]).reduce((a,x)=>a+x.amt,0),0)/allIncKeys.length):totalI;
+    L.push(`Целевые доходы: ${fmt(avgI)} тг`);
+    L.push(`Целевые расходы: ${fmt(Math.round(avgE*0.9))} тг (−10%)`);
+    L.push(`Целевые сбережения: ${fmt(Math.round(avgI*0.2))} тг (20%)`);
+
+    setState({analysis:L.join('\n'),loading:false});
+  },400);
 }
 
-// ── SVG CHARTS ─────────────────────────────────────────────────────────────
-function PieChart(tots, total) {
-  if (!total) return '<div class="empty">Нет данных</div>';
-  const cats = CATS.filter(c=>tots[c.id]).sort((a,b)=>tots[b.id]-tots[a.id]);
-  let angle = -Math.PI/2; const r=70,cx=90,cy=90; let paths='';
-  cats.forEach(c => {
-    const pct=tots[c.id]/total, sweep=pct*2*Math.PI;
+// Charts
+function PieChart(data,total){
+  if(!total) return '<div class="empty">Нет данных</div>';
+  const cats=data.sort((a,b)=>b.v-a.v);
+  let angle=-Math.PI/2; const r=65,cx=85,cy=85; let paths='';
+  cats.forEach(c=>{
+    const pct=c.v/total,sweep=pct*2*Math.PI;
     const x1=cx+r*Math.cos(angle),y1=cy+r*Math.sin(angle);
     const x2=cx+r*Math.cos(angle+sweep),y2=cy+r*Math.sin(angle+sweep);
-    paths+=`<path d="M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} 0 ${sweep>Math.PI?1:0} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${c.c}"/>`;
+    paths+=`<path d="M${cx},${cy} L${x1.toFixed(1)},${y1.toFixed(1)} A${r},${r} 0 ${sweep>Math.PI?1:0} 1 ${x2.toFixed(1)},${y2.toFixed(1)} Z" fill="${c.c}"/>`;
     angle+=sweep;
   });
-  const legend = cats.map(c=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:#94a3b8"><span><span style="color:${c.c}">●</span> ${c.e} ${c.n}</span><span style="color:${c.c}">${Math.round(tots[c.id]/total*100)}%</span></div>`).join('');
-  return `<svg viewBox="0 0 180 180" width="180" height="180" style="display:block;margin:0 auto">${paths}<circle cx="${cx}" cy="${cy}" r="35" fill="#1a1f2e"/></svg>${legend}`;
+  const legend=cats.map(c=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0;color:#94a3b8"><span><span style="color:${c.c}">●</span> ${c.e} ${c.n}</span><span style="color:${c.c}">${Math.round(c.v/total*100)}%</span></div>`).join('');
+  return `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap"><svg viewBox="0 0 170 170" width="150" height="150" style="flex-shrink:0">${paths}<circle cx="${cx}" cy="${cy}" r="30" fill="#1a1f2e"/></svg><div style="flex:1;min-width:140px">${legend}</div></div>`;
 }
-function BarChart(barData) {
-  const max=Math.max(...barData.map(d=>d.v),1), W=320,H=110,pad=30,bW=30,gap=(W-pad*2-bW*6)/5;
+
+function BarChart(barData,color='#fbbf24'){
+  const max=Math.max(...barData.map(d=>d.v),1);
+  const W=320,H=100,pad=28,bW=28,gap=(W-pad*2-bW*6)/5;
   let bars='',labels='',vals='';
   barData.forEach((d,i)=>{
-    const x=pad+i*(bW+gap), bH=d.v?(d.v/max)*(H-20):2, y=H-bH;
-    bars+=`<rect x="${x}" y="${y}" width="${bW}" height="${bH}" rx="4" fill="#fbbf24"/>`;
-    labels+=`<text x="${x+bW/2}" y="${H+14}" text-anchor="middle" fill="#64748b" font-size="10">${d.n}</text>`;
-    if(d.v)vals+=`<text x="${x+bW/2}" y="${y-4}" text-anchor="middle" fill="#94a3b8" font-size="9">${d.v>=1000?Math.round(d.v/1000)+'k':d.v}</text>`;
+    const x=pad+i*(bW+gap),bH=d.v?(d.v/max)*(H-15):2,y=H-bH;
+    bars+=`<rect x="${x}" y="${y}" width="${bW}" height="${bH}" rx="3" fill="${color}"/>`;
+    labels+=`<text x="${x+bW/2}" y="${H+13}" text-anchor="middle" fill="#64748b" font-size="10">${d.n}</text>`;
+    if(d.v)vals+=`<text x="${x+bW/2}" y="${y-3}" text-anchor="middle" fill="#94a3b8" font-size="9">${d.v>=1000?Math.round(d.v/1000)+'k':d.v}</text>`;
   });
-  return `<svg viewBox="0 0 ${W} ${H+20}" width="100%" style="display:block">${bars}${labels}${vals}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H+16}" width="100%" style="display:block">${bars}${labels}${vals}</svg>`;
 }
 
-// ── RENDER ─────────────────────────────────────────────────────────────────
-function render() {
-  const app = document.getElementById('app');
-  const tot = totals(), total = totalSpent(), mData = monthData();
-  const barData = [];
-  for (let i=5;i>=0;i--){let m=S.month-i,y=S.year;if(m<0)m+=12;barData.push({n:MONTHS[m].slice(0,3),v:Math.round((S.data[`${y}-${m}`]||[]).reduce((s,x)=>s+x.amt,0))});}
+function render(){
+  const app=document.getElementById('app');
+  const tot=expTotals(),totalE=totalExp(),totalI=totalInc(),bal=balance();
+  const eData=expData(),iData=incData();
 
-  app.innerHTML = `
+  const barE=[],barI=[];
+  for(let i=5;i>=0;i--){
+    let m=S.month-i,y=S.year; if(m<0)m+=12;
+    barE.push({n:MONTHS[m].slice(0,3),v:Math.round((S.expenses[`${y}-${m}`]||[]).reduce((s,x)=>s+x.amt,0))});
+    barI.push({n:MONTHS[m].slice(0,3),v:Math.round((S.incomes[`${y}-${m}`]||[]).reduce((s,x)=>s+x.amt,0))});
+  }
+
+  const expPieData=EXP_CATS.filter(c=>tot[c.id]).map(c=>({...c,v:tot[c.id]}));
+  const incBycat={};
+  iData.forEach(x=>{incBycat[x.cat]=(incBycat[x.cat]||0)+x.amt;});
+  const incPieData=INC_CATS.filter(c=>incBycat[c.id]).map(c=>({...c,v:incBycat[c.id]}));
+
+  const hasMExp=Object.keys(S.expenses).some(k=>S.expenses[k]?.length);
+  const hasMInc=Object.keys(S.incomes).some(k=>S.incomes[k]?.length);
+
+  app.innerHTML=`
   <div style="min-height:100vh;padding-bottom:40px">
     ${S.syncing?'<div class="sync-bar">💾 Сохранение...</div>':''}
 
@@ -312,18 +355,22 @@ function render() {
         <div class="header-title">💰 ФинДиректор</div>
       </div>
       <div style="text-align:right">
-        <div class="header-label">ИТОГО МЕСЯЦ</div>
-        <div class="header-total" style="color:${total>0?'#fbbf24':'#334155'}">${fmt(total)} <span style="font-size:11px;color:#64748b">тг</span></div>
+        <div style="font-size:10px;color:#64748b;margin-bottom:2px">БАЛАНС МЕСЯЦ</div>
+        <div style="font-size:20px;font-weight:700;color:${bal>0?'#4ade80':bal<0?'#f87171':'#334155'}">${bal>=0?'+':''}${fmt(bal)} <span style="font-size:11px;color:#64748b">тг</span></div>
+        <div style="font-size:11px;color:#64748b">↑${fmt(totalI)} ↓${fmt(totalE)}</div>
       </div>
     </div>
 
     <div class="months">${MONTHS.map((m,i)=>{
-      const isA=i===S.month, hasD=!!(S.data[`${S.year}-${i}`]?.length);
-      return`<button class="mon${isA?' active':hasD?' has':''}" data-m="${i}">${m.slice(0,3)}${hasD&&!isA?' •':''}</button>`;
+      const isA=i===S.month;
+      const hasE=!!(S.expenses[`${S.year}-${i}`]?.length);
+      const hasI=!!(S.incomes[`${S.year}-${i}`]?.length);
+      const has=hasE||hasI;
+      return`<button class="mon${isA?' active':has?' has':''}" data-m="${i}">${m.slice(0,3)}${has&&!isA?' •':''}</button>`;
     }).join('')}</div>
 
     <div class="tabs">
-      ${[['expenses','📋 Расходы'],['charts','📊 График'],['csv','📥 CSV'],['analysis','📊 Анализ']].map(([t,l])=>`<button class="tab${S.tab===t?' active':''}" data-tab="${t}">${l}</button>`).join('')}
+      ${[['expenses','💸 Расходы'],['incomes','💵 Доходы'],['charts','📊 График'],['csv','📥 CSV'],['analysis','🤖 Анализ']].map(([t,l])=>`<button class="tab${S.tab===t?' active':''}" data-tab="${t}">${l}</button>`).join('')}
     </div>
 
     <div class="content-wrap">
@@ -332,27 +379,27 @@ function render() {
       <div class="card">
         <span class="lbl">ДОБАВИТЬ РАСХОД</span>
         <div class="grid2" style="margin-bottom:10px">
-          <select class="inp" id="fCat">${CATS.map(c=>`<option value="${c.id}"${c.id===S.form.cat?' selected':''}>${c.e} ${c.n}</option>`).join('')}</select>
-          <input class="inp" type="number" inputmode="decimal" placeholder="Сумма (тг)" id="fAmt" value="${S.form.amt}"/>
+          <select class="inp" id="eCat">${EXP_CATS.map(c=>`<option value="${c.id}"${c.id===S.expForm.cat?' selected':''}>${c.e} ${c.n}</option>`).join('')}</select>
+          <input class="inp" type="number" inputmode="decimal" placeholder="Сумма (тг)" id="eAmt" value="${S.expForm.amt}"/>
         </div>
         <div style="display:grid;grid-template-columns:1fr auto;gap:10px">
-          <input class="inp" placeholder="Заметка" id="fNote" value="${S.form.note}"/>
-          <button class="btn" id="addBtn">+ Добавить</button>
+          <input class="inp" placeholder="Заметка" id="eNote" value="${S.expForm.note}"/>
+          <button class="btn" id="addExpBtn">+ Добавить</button>
         </div>
       </div>
 
-      ${total>0?`<div class="grid2" style="margin-bottom:14px">${CATS.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).map(c=>`
+      ${totalE>0?`<div class="grid2" style="margin-bottom:14px">${EXP_CATS.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).map(c=>`
         <div class="catcard" style="border-left:3px solid ${c.c}">
           <span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span>
           <div style="text-align:right">
             <div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(tot[c.id])} тг</div>
-            <div style="font-size:10px;color:#475569">${Math.round(tot[c.id]/total*100)}%</div>
+            <div style="font-size:10px;color:#475569">${Math.round(tot[c.id]/totalE*100)}%</div>
           </div>
         </div>`).join('')}</div>`:''}
 
-      <span class="lbl">ЗАПИСИ — ${MONTHS[S.month]} (${mData.length})</span>
-      ${mData.length===0?`<div class="empty">Нет расходов.<br>Добавь вручную или импортируй CSV.</div>`:
-        [...mData].reverse().map(item=>{const c=getCat(item.cat);return`
+      <span class="lbl">ЗАПИСИ — ${MONTHS[S.month]} (${eData.length})</span>
+      ${eData.length===0?`<div class="empty">Нет расходов.<br>Добавь вручную или импортируй CSV.</div>`:
+        [...eData].reverse().map(item=>{const c=getExpCat(item.cat);return`
         <div class="entry">
           <div style="display:flex;align-items:center;gap:10px">
             <div class="dot" style="background:${c.c}"></div>
@@ -363,14 +410,91 @@ function render() {
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
             <span style="font-weight:700;color:${c.c};font-size:14px">${fmt(item.amt)} тг</span>
-            <button class="del-btn" data-fid="${item.firestoreId}">×</button>
+            <button class="del-btn" data-type="exp" data-fid="${item.fid}">×</button>
+          </div>
+        </div>`;}).join('')}
+    `:''}
+
+    ${S.tab==='incomes'?`
+      <div class="card" style="border-color:#4ade8030">
+        <span class="lbl">ДОБАВИТЬ ДОХОД</span>
+        <div class="grid2" style="margin-bottom:10px">
+          <select class="inp" id="iCat">${INC_CATS.map(c=>`<option value="${c.id}"${c.id===S.incForm.cat?' selected':''}>${c.e} ${c.n}</option>`).join('')}</select>
+          <input class="inp" type="number" inputmode="decimal" placeholder="Сумма (тг)" id="iAmt" value="${S.incForm.amt}"/>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:10px">
+          <input class="inp" placeholder="Заметка (необязательно)" id="iNote" value="${S.incForm.note}"/>
+          <button class="btn" id="addIncBtn" style="background:#4ade80;color:#0f1117">+ Добавить</button>
+        </div>
+      </div>
+
+      ${totalI>0?`
+        <div class="card" style="margin-bottom:14px;border-color:#4ade8030">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <span class="lbl" style="margin:0">ИТОГО ДОХОДОВ</span>
+            <span style="font-size:20px;font-weight:700;color:#4ade80">${fmt(totalI)} тг</span>
+          </div>
+          <div class="grid2">
+            ${INC_CATS.filter(c=>incBycat[c.id]).map(c=>`
+            <div class="catcard" style="border-left:3px solid ${c.c}">
+              <span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span>
+              <div style="text-align:right">
+                <div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(incBycat[c.id])} тг</div>
+                <div style="font-size:10px;color:#475569">${Math.round(incBycat[c.id]/totalI*100)}%</div>
+              </div>
+            </div>`).join('')}
+          </div>
+        </div>`:''}
+
+      <span class="lbl">ЗАПИСИ — ${MONTHS[S.month]} (${iData.length})</span>
+      ${iData.length===0?`<div class="empty">Нет доходов за этот месяц.<br>Добавь вручную.</div>`:
+        [...iData].reverse().map(item=>{const c=getIncCat(item.cat);return`
+        <div class="entry">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="dot" style="background:${c.c}"></div>
+            <div>
+              <div style="font-size:12px;color:#64748b">${c.e} ${c.n}</div>
+              ${item.note?`<div style="font-size:12px;color:#94a3b8">${item.note}</div>`:''}
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+            <span style="font-weight:700;color:${c.c};font-size:14px">+${fmt(item.amt)} тг</span>
+            <button class="del-btn" data-type="inc" data-fid="${item.fid}">×</button>
           </div>
         </div>`;}).join('')}
     `:''}
 
     ${S.tab==='charts'?`
-      <div class="card"><span class="lbl">СТРУКТУРА РАСХОДОВ</span>${PieChart(tot,total)}</div>
-      <div class="card"><span class="lbl">РАСХОДЫ ПО МЕСЯЦАМ</span>${BarChart(barData)}</div>
+      <div class="card">
+        <span class="lbl">ДОХОДЫ vs РАСХОДЫ (6 месяцев)</span>
+        <div style="display:flex;gap:12px;margin-bottom:8px;font-size:12px">
+          <span style="color:#4ade80">● Доходы</span>
+          <span style="color:#f87171">● Расходы</span>
+        </div>
+        <div style="position:relative">
+          ${BarChart(barI,'#4ade80')}
+          <div style="position:absolute;top:0;left:0;right:0;opacity:0.7">${BarChart(barE,'#f87171')}</div>
+        </div>
+      </div>
+      ${totalE>0?`<div class="card"><span class="lbl">СТРУКТУРА РАСХОДОВ</span>${PieChart(expPieData,totalE)}</div>`:''}
+      ${totalI>0?`<div class="card"><span class="lbl">СТРУКТУРА ДОХОДОВ</span>${PieChart(incPieData,totalI)}</div>`:''}
+
+      <div class="card">
+        <span class="lbl">БАЛАНС МЕСЯЦА</span>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1e2a3a">
+          <span style="color:#94a3b8">💵 Доходы</span>
+          <span style="color:#4ade80;font-weight:700">+${fmt(totalI)} тг</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1e2a3a">
+          <span style="color:#94a3b8">💸 Расходы</span>
+          <span style="color:#f87171;font-weight:700">−${fmt(totalE)} тг</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:10px 0">
+          <span style="color:#f1f5f9;font-weight:700">⚖️ Остаток</span>
+          <span style="color:${bal>=0?'#4ade80':'#f87171'};font-weight:700;font-size:18px">${bal>=0?'+':''}${fmt(bal)} тг</span>
+        </div>
+        ${totalI>0?`<div style="margin-top:4px;font-size:12px;color:#64748b">Тратишь ${Math.round(totalE/totalI*100)}% от дохода · Остаток ${Math.round(bal/totalI*100)}%</div>`:''}
+      </div>
     `:''}
 
     ${S.tab==='csv'?`
@@ -381,8 +505,9 @@ function render() {
           <div style="font-size:12px;color:#475569">Kaspi, Halyk и другие банки</div>
           <input type="file" id="fileInp" accept=".csv,.txt" style="display:none"/>
         </div>
-        <div class="card"><span class="lbl">ФОРМАТЫ</span>
-          <div style="font-size:13px;color:#64748b;line-height:1.9">✅ <b style="color:#94a3b8">Kaspi/Halyk</b> — без заголовков<br>✅ <b style="color:#94a3b8">Стандартный CSV</b> — с заголовками</div>
+        <div class="card">
+          <span class="lbl">ФОРМАТЫ</span>
+          <div style="font-size:13px;color:#64748b;line-height:1.9">✅ <b style="color:#94a3b8">Kaspi/Halyk</b> без заголовков<br>✅ <b style="color:#94a3b8">Стандартный CSV</b> с заголовками</div>
         </div>`:''}
       ${S.csv.step==='mapping'?`
         <div class="card">
@@ -405,7 +530,7 @@ function render() {
           <span class="lbl">ПРЕДПРОСМОТР</span>
           <div style="font-size:12px;color:#4ade80;margin-bottom:12px;background:#0f2a1a;padding:8px 12px;border-radius:6px">✅ ${S.csv.preview.length} записей · ${fmt(S.csv.preview.reduce((s,r)=>s+r.amt,0))} тг</div>
           <div style="max-height:280px;overflow-y:auto;margin-bottom:14px">
-            ${S.csv.preview.slice(0,100).map(r=>{const c=getCat(r.cat),d=new Date(r.date);return`
+            ${S.csv.preview.slice(0,100).map(r=>{const c=getExpCat(r.cat),d=new Date(r.date);return`
             <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e2a3a22">
               <div style="display:flex;gap:8px;align-items:center">
                 <span style="font-size:11px;color:#475569;flex-shrink:0">${d.getDate()}.${String(d.getMonth()+1).padStart(2,'0')}</span>
@@ -424,15 +549,15 @@ function render() {
     `:''}
 
     ${S.tab==='analysis'?`
-      <button class="btn" id="analyzeBtn" style="width:100%;background:${S.loading?'#1e2a3a':'linear-gradient(135deg,#f59e0b,#fbbf24)'};color:${S.loading?'#64748b':'#0f1117'};border:none;border-radius:10px;padding:16px;font-size:15px;font-weight:700;margin-bottom:16px">
-        ${S.loading?'⏳ Считаю...':'📊 Анализировать расходы'}
+      <button class="btn" id="analyzeBtn" style="width:100%;background:${S.loading?'#1e2a3a':'linear-gradient(135deg,#f59e0b,#fbbf24)'};color:${S.loading?'#64748b':'#0f1117'};border:none;border-radius:10px;padding:16px;font-size:15px;font-weight:700;cursor:${S.loading?'not-allowed':'pointer'};margin-bottom:16px">
+        ${S.loading?'⏳ Анализирую...':'🤖 Полный финансовый анализ'}
       </button>
-      ${!S.analysis&&!S.loading?'<div class="empty">Нажми кнопку — получишь детальный анализ<br>и советы по экономии</div>':''}
+      ${!S.analysis&&!S.loading?'<div class="empty">Нажми кнопку — получишь полный анализ<br>доходов, расходов и советы по накоплению</div>':''}
       ${S.loading?'<div class="empty">⚙️ Считаю данные...</div>':''}
       ${S.analysis?`<div class="card" style="line-height:1.8">
         ${S.analysis.split('\n').map(line=>{
-          const bold=line.startsWith('📊')||line.startsWith('🔍')||line.startsWith('⚡')||line.startsWith('💡')||line.startsWith('📈')||line.startsWith('🎯');
-          return`<p class="analysis-line ${bold?'bold':'normal'}">${line||'&nbsp;'}</p>`;
+          const bold=line.startsWith('📊')||line.startsWith('💰')||line.startsWith('🔍')||line.startsWith('⚡')||line.startsWith('💡')||line.startsWith('📈')||line.startsWith('🎯');
+          return`<p style="margin:0 0 6px 0;font-weight:${bold?700:400};color:${bold?'#f1f5f9':'#94a3b8'};font-size:${bold?15:13}px">${line||'&nbsp;'}</p>`;
         }).join('')}
       </div>`:''}
     `:''}
@@ -440,50 +565,63 @@ function render() {
     </div>
   </div>`;
 
-  // ── BIND EVENTS ──────────────────────────────────────────────────────────
-  document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => setState({month:+b.dataset.m}));
-  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => setState({tab:b.dataset.tab}));
-  document.querySelectorAll('.del-btn').forEach(b => b.onclick = () => removeExpense(b.dataset.fid));
+  // EVENTS
+  document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>setState({month:+b.dataset.m}));
+  document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>setState({tab:b.dataset.tab}));
+  document.querySelectorAll('.del-btn').forEach(b=>b.onclick=()=>{
+    if(b.dataset.type==='exp') delExpense(b.dataset.fid);
+    else delIncome(b.dataset.fid);
+  });
 
-  const addBtn = document.getElementById('addBtn');
-  if (addBtn) {
-    addBtn.onclick = () => {
-      const amt=document.getElementById('fAmt').value;
-      const note=document.getElementById('fNote').value;
-      const cat=document.getElementById('fCat').value;
-      setState({form:{cat,amt,note}});
+  // Expense form
+  const addExpBtn=document.getElementById('addExpBtn');
+  if(addExpBtn){
+    addExpBtn.onclick=()=>{
+      setState({expForm:{cat:document.getElementById('eCat').value,amt:document.getElementById('eAmt').value,note:document.getElementById('eNote').value}});
       setTimeout(addExpense,0);
     };
-    document.getElementById('fAmt').onkeydown = e => { if(e.key==='Enter') addBtn.click(); };
-    document.getElementById('fNote').onkeydown = e => { if(e.key==='Enter') addBtn.click(); };
-    document.getElementById('fCat').onchange = e => setState({form:{...S.form,cat:e.target.value}});
+    document.getElementById('eAmt').onkeydown=e=>{if(e.key==='Enter')addExpBtn.click();};
+    document.getElementById('eNote').onkeydown=e=>{if(e.key==='Enter')addExpBtn.click();};
+    document.getElementById('eCat').onchange=e=>setState({expForm:{...S.expForm,cat:e.target.value}});
   }
-  const analyzeBtn = document.getElementById('analyzeBtn');
-  if (analyzeBtn) analyzeBtn.onclick = () => { if(!S.loading) doAnalysis(); };
 
-  const dropZone = document.getElementById('dropZone');
-  const fileInp  = document.getElementById('fileInp');
-  if (dropZone) {
-    dropZone.onclick = () => fileInp.click();
-    dropZone.ondragover = e => { e.preventDefault(); dropZone.classList.add('over'); };
-    dropZone.ondragleave = () => dropZone.classList.remove('over');
-    dropZone.ondrop = e => { e.preventDefault(); dropZone.classList.remove('over'); handleFile(e.dataTransfer.files[0]); };
-    fileInp.onchange = e => handleFile(e.target.files[0]);
+  // Income form
+  const addIncBtn=document.getElementById('addIncBtn');
+  if(addIncBtn){
+    addIncBtn.onclick=()=>{
+      setState({incForm:{cat:document.getElementById('iCat').value,amt:document.getElementById('iAmt').value,note:document.getElementById('iNote').value}});
+      setTimeout(addIncome,0);
+    };
+    document.getElementById('iAmt').onkeydown=e=>{if(e.key==='Enter')addIncBtn.click();};
+    document.getElementById('iNote').onkeydown=e=>{if(e.key==='Enter')addIncBtn.click();};
+    document.getElementById('iCat').onchange=e=>setState({incForm:{...S.incForm,cat:e.target.value}});
   }
-  document.querySelectorAll('.csv-map').forEach(sel => {
-    sel.onchange = e => setState({csv:{...S.csv,map:{...S.csv.map,[sel.dataset.field]:e.target.value}}});
+
+  const analyzeBtn=document.getElementById('analyzeBtn');
+  if(analyzeBtn) analyzeBtn.onclick=()=>{if(!S.loading)doAnalysis();};
+
+  const dropZone=document.getElementById('dropZone');
+  const fileInp=document.getElementById('fileInp');
+  if(dropZone){
+    dropZone.onclick=()=>fileInp.click();
+    dropZone.ondragover=e=>{e.preventDefault();dropZone.classList.add('over');};
+    dropZone.ondragleave=()=>dropZone.classList.remove('over');
+    dropZone.ondrop=e=>{e.preventDefault();dropZone.classList.remove('over');handleFile(e.dataTransfer.files[0]);};
+    fileInp.onchange=e=>handleFile(e.target.files[0]);
+  }
+  document.querySelectorAll('.csv-map').forEach(sel=>{
+    sel.onchange=e=>setState({csv:{...S.csv,map:{...S.csv.map,[sel.dataset.field]:e.target.value}}});
   });
-  const csvBack = document.getElementById('csvBack');
-  if (csvBack) csvBack.onclick = () => setState({csv:{...S.csv,step:S.csv.headers.length?'mapping':'idle'}});
-  const csvPreviewBtn = document.getElementById('csvPreviewBtn');
-  if (csvPreviewBtn) csvPreviewBtn.onclick = () => { if(S.csv.map.amt) buildPreview(); };
-  const csvImportBtn = document.getElementById('csvImportBtn');
-  if (csvImportBtn) csvImportBtn.onclick = importCSV;
+  const csvBack=document.getElementById('csvBack');
+  if(csvBack) csvBack.onclick=()=>setState({csv:{...S.csv,step:S.csv.headers.length?'mapping':'idle'}});
+  const csvPreviewBtn=document.getElementById('csvPreviewBtn');
+  if(csvPreviewBtn) csvPreviewBtn.onclick=()=>{if(S.csv.map.amt)buildPreview();};
+  const csvImportBtn=document.getElementById('csvImportBtn');
+  if(csvImportBtn) csvImportBtn.onclick=importCSV;
 }
 
-// ── BOOT ───────────────────────────────────────────────────────────────────
 render();
-await loadAllFromFirestore();
+await loadAll();
 </script>
 </body>
 </html>
