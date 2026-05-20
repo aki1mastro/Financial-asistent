@@ -229,6 +229,36 @@ async function initDefaultCategories(){
   }
 }
 
+async function resetCategoriesToDefault(type) {
+  const label = type === 'expense' ? 'расходов' : 'доходов';
+  if (!confirm(`Сбросить категории ${label} к стандартным?\n\nСтарые категории будут удалены из Firebase и заменены стандартными.\nЗаписи останутся нетронутыми.`)) return;
+  setState({syncing: true});
+
+  // Delete existing categories of this type from Firebase
+  const snap = await getDocs(collection(db, 'categories'));
+  for (const d of snap.docs) {
+    const data = d.data();
+    if (data.type === type || (type === 'expense' && !data.type)) {
+      await deleteDoc(doc(db, 'categories', d.id));
+    }
+  }
+
+  // Re-create from defaults
+  const defaults = type === 'expense' ? DEFAULT_EXP : DEFAULT_INC;
+  const newCats = [];
+  for (let i = 0; i < defaults.length; i++) {
+    const cat = {...defaults[i], type, order: i};
+    const ref = await addDoc(collection(db, 'categories'), cat);
+    newCats.push({...cat, fid: ref.id});
+  }
+
+  if (type === 'expense') S.expCats = newCats;
+  else S.incCats = newCats;
+
+  setState({syncing: false});
+  alert(`✅ Категории ${label} сброшены к стандартным!`);
+}
+
 // Expenses/Incomes CRUD
 async function addExpense(){
   const amt=Number(S.expForm.amt);if(!amt||amt<=0)return;
@@ -390,10 +420,13 @@ function renderSettings(){
 
   return`
   <!-- Type Toggle -->
-  <div style="display:flex;gap:8px;margin-bottom:16px">
+  <div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="${type==='expense'?'btn':'btn2'}" style="flex:1" data-set-type="expense">💸 Расходы</button>
     <button class="${type==='income'?'btn':'btn2'}" style="flex:1;${type==='income'?'background:#4ade80;color:#0f1117':''}" data-set-type="income">💵 Доходы</button>
   </div>
+  <button id="resetCatsBtn" style="width:100%;padding:8px;background:#1e2a3a;border:1px dashed #334155;color:#64748b;border-radius:8px;cursor:pointer;font-size:12px;margin-bottom:14px;font-family:inherit">
+    🔄 Сбросить категории к стандартным
+  </button>
 
   <!-- Add new category -->
   <div class="card" style="margin-bottom:16px;${type==='income'?'border-color:#4ade8030':''}">
@@ -689,6 +722,8 @@ function render(){
 
   // SETTINGS EVENTS
   document.querySelectorAll('[data-set-type]').forEach(b=>b.onclick=()=>setState({settings:{...S.settings,activeType:b.dataset.setType,editId:null,editCat:null,newCat:{...S.settings.newCat,type:b.dataset.setType}}}));
+  const resetCatsBtn=document.getElementById('resetCatsBtn');
+  if(resetCatsBtn) resetCatsBtn.onclick=()=>resetCategoriesToDefault(S.settings.activeType);
 
   // Color pickers (new)
   document.querySelectorAll('.color-pick').forEach(b=>b.onclick=()=>{setState({settings:{...S.settings,newCat:{...S.settings.newCat,c:b.dataset.color}}});});
