@@ -409,7 +409,12 @@ function render(){
         <div style="font-size:11px;color:#64748b">↑${fmt(totalI)} ↓${fmt(totalE)}</div>
       </div>
     </div>
-    <div class="months">${MONTHS.map((m,i)=>{const isA=i===S.month;const has=!!(S.expenses[`${S.year}-${i}`]?.length||S.incomes[`${S.year}-${i}`]?.length);return`<button class="mon${isA?' active':has?' has':''}" data-m="${i}">${m.slice(0,3)}${has&&!isA?' •':''}</button>`;}).join('')}</div>
+    <div style="display:flex;align-items:center;background:#13161f;border-bottom:1px solid #1e2a3a;padding:0 8px">
+      <button id="prevYear" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:18px;padding:8px 10px;font-family:inherit;flex-shrink:0">‹</button>
+      <div style="font-size:12px;font-weight:700;color:#94a3b8;min-width:36px;text-align:center;flex-shrink:0">${S.year}</div>
+      <button id="nextYear" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:18px;padding:8px 10px;font-family:inherit;flex-shrink:0">›</button>
+      <div class="months" style="border:none;flex:1;overflow-x:auto">${MONTHS.map((m,i)=>{const isA=i===S.month;const has=!!(S.expenses[`${S.year}-${i}`]?.length||S.incomes[`${S.year}-${i}`]?.length);return`<button class="mon${isA?' active':has?' has':''}" data-m="${i}">${m.slice(0,3)}${has&&!isA?' •':''}</button>`;}).join('')}</div>
+    </div>
     <div class="tabs">
       ${[['expenses','💸 Расходы'],['incomes','💵 Доходы'],['charts','📊 График'],['csv','📥 CSV'],['analysis','🤖 Анализ'],['settings','⚙️']].map(([t,l])=>`<button class="tab${S.tab===t?' active':''}" data-tab="${t}">${l}</button>`).join('')}
     </div>
@@ -557,6 +562,8 @@ function render(){
 
   // EVENTS
   document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>setState({month:+b.dataset.m}));
+  const prevYear=document.getElementById('prevYear');if(prevYear)prevYear.onclick=()=>setState({year:S.year-1});
+  const nextYear=document.getElementById('nextYear');if(nextYear)nextYear.onclick=()=>setState({year:S.year+1});
   document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>setState({tab:b.dataset.tab}));
   document.querySelectorAll('.del-btn').forEach(b=>b.onclick=()=>{if(b.dataset.type==='exp')delExpense(b.dataset.fid);else delIncome(b.dataset.fid);});
 
