@@ -563,12 +563,12 @@ function render(){
       ${totalE>0?`<div class="grid2" style="margin-bottom:14px">${S.expCats.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).map(c=>`<div class="catcard" style="border-left:3px solid ${c.c}"><span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span><div style="text-align:right"><div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(tot[c.id])} тг</div><div style="font-size:10px;color:#475569">${Math.round(tot[c.id]/totalE*100)}%</div></div></div>`).join('')}</div>`:''}
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <span class="lbl" style="margin:0">ЗАПИСИ — ${MONTHS[S.month]} (${eData.length})</span>
-        <div style="display:flex;gap:4px">
-          <button class="sort-btn${S.sortBy==='date_desc'?' sort-active':''}" data-sort="date_desc">🕐 Новые</button>
-          <button class="sort-btn${S.sortBy==='date_asc'?' sort-active':''}" data-sort="date_asc">🕐 Старые</button>
-          <button class="sort-btn${S.sortBy==='amt_desc'?' sort-active':''}" data-sort="amt_desc">↑ Сумма</button>
-          <button class="sort-btn${S.sortBy==='amt_asc'?' sort-active':''}" data-sort="amt_asc">↓ Сумма</button>
-        </div>
+        <select class="sort-sel" data-sort-sel="1" style="background:#1a1f2e;border:1px solid #1e2a3a;color:#64748b;padding:3px 6px;border-radius:6px;font-size:11px;font-family:inherit;cursor:pointer;outline:none">
+          <option value="date_desc"${S.sortBy==='date_desc'?' selected':''}>🕐 Новые</option>
+          <option value="date_asc"${S.sortBy==='date_asc'?' selected':''}>🕐 Старые</option>
+          <option value="amt_desc"${S.sortBy==='amt_desc'?' selected':''}>↑ Сумма</option>
+          <option value="amt_asc"${S.sortBy==='amt_asc'?' selected':''}>↓ Сумма</option>
+        </select>
       </div>
       ${eData.length===0?`<div class="empty">Нет расходов.<br>Добавь вручную или импортируй CSV.</div>`:
         sortEntries(eData).map(item=>{
@@ -624,12 +624,12 @@ function render(){
       ${totalI>0?`<div class="card" style="margin-bottom:14px;border-color:#4ade8030"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span class="lbl" style="margin:0">ИТОГО ДОХОДОВ</span><span style="font-size:20px;font-weight:700;color:#4ade80">${fmt(totalI)} тг</span></div><div class="grid2">${S.incCats.filter(c=>incBycat[c.id]).map(c=>`<div class="catcard" style="border-left:3px solid ${c.c}"><span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span><div style="text-align:right"><div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(incBycat[c.id])} тг</div><div style="font-size:10px;color:#475569">${Math.round(incBycat[c.id]/totalI*100)}%</div></div></div>`).join('')}</div></div>`:''}
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <span class="lbl" style="margin:0">ЗАПИСИ — ${MONTHS[S.month]} (${iData.length})</span>
-        <div style="display:flex;gap:4px">
-          <button class="sort-btn${S.sortBy==='date_desc'?' sort-active':''}" data-sort="date_desc">🕐 Новые</button>
-          <button class="sort-btn${S.sortBy==='date_asc'?' sort-active':''}" data-sort="date_asc">🕐 Старые</button>
-          <button class="sort-btn${S.sortBy==='amt_desc'?' sort-active':''}" data-sort="amt_desc">↑ Сумма</button>
-          <button class="sort-btn${S.sortBy==='amt_asc'?' sort-active':''}" data-sort="amt_asc">↓ Сумма</button>
-        </div>
+        <select class="sort-sel" data-sort-sel="1" style="background:#1a1f2e;border:1px solid #1e2a3a;color:#64748b;padding:3px 6px;border-radius:6px;font-size:11px;font-family:inherit;cursor:pointer;outline:none">
+          <option value="date_desc"${S.sortBy==='date_desc'?' selected':''}>🕐 Новые</option>
+          <option value="date_asc"${S.sortBy==='date_asc'?' selected':''}>🕐 Старые</option>
+          <option value="amt_desc"${S.sortBy==='amt_desc'?' selected':''}>↑ Сумма</option>
+          <option value="amt_asc"${S.sortBy==='amt_asc'?' selected':''}>↓ Сумма</option>
+        </select>
       </div>
       ${iData.length===0?`<div class="empty">Нет доходов за этот месяц.</div>`:
         sortEntries(iData).map(item=>{
@@ -712,7 +712,7 @@ function render(){
 
   // EVENTS
   document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>setState({month:+b.dataset.m}));
-  document.querySelectorAll('[data-sort]').forEach(b=>b.onclick=()=>setState({sortBy:b.dataset.sort}));
+  document.querySelectorAll('[data-sort-sel]').forEach(s=>s.onchange=e=>setState({sortBy:e.target.value}));
   const balToggle=document.getElementById('balanceToggle');
   if(balToggle) balToggle.onclick=()=>setState({hideBalance:!S.hideBalance});
   const prevYear=document.getElementById('prevYear');if(prevYear)prevYear.onclick=()=>setState({year:S.year-1});
