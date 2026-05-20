@@ -136,6 +136,7 @@ let S = {
   tab:'expenses',
   expForm:{cat:'food',amt:'',note:'',date:''},
   sortBy:'date_desc', // date_desc | date_asc | amt_desc | amt_asc
+  goal:{name:'',amount:0}, // savings goal
   incForm:{cat:'salary',amt:'',note:'',date:''},
   csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
   analysis:'', loading:false, syncing:false, hideBalance:false,
@@ -354,44 +355,135 @@ async function importCSV(){
 function doAnalysis(){
   setState({loading:true,analysis:'',tab:'analysis'});
   setTimeout(()=>{
-    const tot=expTotals(),totalE=totalExp(),totalI=totalInc(),bal=balance();
-    const allExpKeys=Object.keys(S.expenses),allIncKeys=Object.keys(S.incomes);
+    const tot=expTotals(), totalE=totalExp(), totalI=totalInc(), bal=balance();
+    const allExpKeys=Object.keys(S.expenses).sort();
+    const allIncKeys=Object.keys(S.incomes).sort();
+    const allKeys=[...new Set([...allExpKeys,...allIncKeys])].sort();
     const L=[];
-    L.push(`📊 ФИНАНСОВЫЙ АНАЛИЗ: ${MONTHS[S.month]} ${S.year}`);L.push('');
-    L.push(`💵 Доходы:  ${fmt(totalI)} тг`);L.push(`💸 Расходы: ${fmt(totalE)} тг`);
-    L.push(`${bal>=0?'✅':'❌'} Баланс:  ${bal>=0?'+':''}${fmt(bal)} тг`);
-    if(totalI>0)L.push(`📊 Тратишь ${Math.round(totalE/totalI*100)}% от дохода`);
+
+    // ── ШАПКА ──
+    L.push(`📊 ФИНАНСОВЫЙ АНАЛИЗ: ${MONTHS[S.month]} ${S.year}`);
     L.push('');
-    if(totalI>0){
-      const sp=Math.round(bal/totalI*100);L.push('💰 НОРМА СБЕРЕЖЕНИЙ');
-      if(sp>=20)L.push(`✅ Откладываешь ${sp}% — отлично! Норма от 20%.`);
-      else if(sp>=10)L.push(`⚠️ Откладываешь ${sp}% — неплохо, стремись к 20%.`);
-      else if(sp>0)L.push(`⚠️ Откладываешь только ${sp}% — сократи расходы.`);
-      else L.push(`❌ Расходы превышают доходы на ${fmt(Math.abs(bal))} тг!`);
+    L.push(`💵 Доходы:   ${fmt(totalI)} тг`);
+    L.push(`💸 Расходы:  ${fmt(totalE)} тг`);
+    const balSign = bal>=0?'+':'';
+    L.push(`${bal>=0?'✅':'❌'} Баланс:   ${balSign}${fmt(bal)} тг`);
+    if(totalI>0) L.push(`📊 Расходуешь ${Math.round(totalE/totalI*100)}% от дохода, остаток ${Math.round(Math.max(0,bal)/totalI*100)}%`);
+    L.push('');
+
+    // ── СРАВНЕНИЕ С ПРОШЛЫМ МЕСЯЦЕМ ──
+    let prevM = S.month-1, prevY = S.year;
+    if(prevM < 0){prevM=11; prevY--;}
+    const prevKey = `${prevY}-${prevM}`;
+    const prevE = (S.expenses[prevKey]||[]).reduce((s,x)=>s+x.amt,0);
+    const prevI = (S.incomes[prevKey]||[]).reduce((s,x)=>s+x.amt,0);
+    if(prevE > 0 || prevI > 0){
+      L.push(`📅 СРАВНЕНИЕ С ${MONTHS[prevM].toUpperCase()}`);
+      const dE = totalE - prevE;
+      const dI = totalI - prevI;
+      if(prevE>0) L.push(`  Расходы: ${fmt(prevE)} → ${fmt(totalE)} тг (${dE>=0?'+':''}${fmt(dE)}, ${dE>=0?'▲':'▼'}${Math.abs(Math.round(dE/prevE*100))}%)`);
+      if(prevI>0) L.push(`  Доходы:  ${fmt(prevI)} → ${fmt(totalI)} тг (${dI>=0?'+':''}${fmt(dI)}, ${dI>=0?'▲':'▼'}${Math.abs(Math.round(dI/prevI*100))}%)`);
+      if(totalE > 0 && prevE > 0){
+        // Category changes
+        const prevTot = (S.expenses[prevKey]||[]).reduce((acc,x)=>{acc[x.cat]=(acc[x.cat]||0)+x.amt;return acc;},{});
+        const biggest = S.expCats.filter(c=>tot[c.id]||prevTot[c.id])
+          .map(c=>({...c, diff:(tot[c.id]||0)-(prevTot[c.id]||0)}))
+          .sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff)).slice(0,2);
+        biggest.forEach(c=>{
+          if(Math.abs(c.diff)>1000) L.push(`  ${c.e} ${c.n}: ${c.diff>=0?'+':''}${fmt(c.diff)} тг`);
+        });
+      }
       L.push('');
     }
+
+    // ── НОРМА СБЕРЕЖЕНИЙ ──
+    if(totalI>0){
+      const sp=Math.round(Math.max(0,bal)/totalI*100);
+      L.push('💰 НОРМА СБЕРЕЖЕНИЙ');
+      if(sp>=20) L.push(`✅ ${sp}% — отлично! Продолжай в том же духе.`);
+      else if(sp>=10) L.push(`⚠️ ${sp}% — неплохо. Стремись к 20% (${fmt(Math.round(totalI*0.2))} тг).`);
+      else if(sp>0) L.push(`⚠️ Только ${sp}% — постарайся довести до 20% (${fmt(Math.round(totalI*0.2))} тг).`);
+      else L.push(`❌ Расходы превышают доходы на ${fmt(Math.abs(bal))} тг — срочная оптимизация!`);
+      L.push('');
+    }
+
+    // ── СТРУКТУРА РАСХОДОВ ──
     if(totalE>0){
       L.push('🔍 СТРУКТУРА РАСХОДОВ');
-      S.expCats.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).forEach(c=>L.push(`${c.e} ${c.n}: ${fmt(tot[c.id])} тг (${Math.round(tot[c.id]/totalE*100)}%)`));
+      S.expCats.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).forEach(c=>{
+        const pct=Math.round(tot[c.id]/totalE*100);
+        L.push(`${c.e} ${c.n}: ${fmt(tot[c.id])} тг (${pct}%)`);
+      });
       L.push('');
     }
-    L.push('💡 РЕКОМЕНДАЦИИ');let n=1;
-    if(bal<0)L.push(`${n++}. Расходы выше доходов на ${fmt(Math.abs(bal))} тг — найди статью для сокращения.`);
-    if(totalI>0&&bal/totalI<0.1&&bal>=0)L.push(`${n++}. Норма сбережений ниже 10%. Правило 50/30/20: нужды/желания/сбережения.`);
-    if(tot.credit&&tot.credit/totalE>0.25)L.push(`${n++}. Кредиты — ${Math.round(tot.credit/totalE*100)}% расходов. Рассмотри рефинансирование.`);
-    if(tot.cafe&&tot.cafe/totalE>0.1)L.push(`${n++}. Кафе: готовка дома сэкономит ~${fmt(Math.round(tot.cafe*0.4))} тг/мес.`);
-    if(totalI>0)L.push(`${n++}. Цель: откладывай минимум ${fmt(Math.round(totalI*0.2))} тг/мес (20% от дохода).`);
+
+    // ── КРЕДИТЫ — КОГДА ЗАКРОЮТСЯ ──
+    const creditAmt = tot.credit || 0;
+    if(creditAmt > 0){
+      L.push('💳 АНАЛИЗ КРЕДИТОВ');
+      L.push(`  Платишь ${fmt(creditAmt)} тг/мес по кредитам`);
+      if(totalI>0) L.push(`  Кредитная нагрузка: ${Math.round(creditAmt/totalI*100)}% от дохода ${Math.round(creditAmt/totalI*100)>30?'⚠️ выше нормы (30%)':'✅ в норме'}`);
+      // Average monthly credit from history
+      const months_with_credit = allExpKeys.filter(k=>(S.expenses[k]||[]).some(x=>x.cat==='credit'));
+      if(months_with_credit.length>=2){
+        const avgCredit = months_with_credit.reduce((s,k)=>{
+          return s+(S.expenses[k]||[]).filter(x=>x.cat==='credit').reduce((a,x)=>a+x.amt,0);
+        },0)/months_with_credit.length;
+        L.push(`  Средний платёж: ${fmt(avgCredit)} тг/мес за ${months_with_credit.length} мес.`);
+      }
+      L.push('');
+    }
+
+    // ── СОВЕТЫ ──
+    L.push('💡 РЕКОМЕНДАЦИИ');
+    let n=1;
+    if(bal<0) L.push(`${n++}. Расходы выше доходов на ${fmt(Math.abs(bal))} тг — найди что сократить.`);
+    if(totalI>0&&Math.max(0,bal)/totalI<0.1&&bal>=0) L.push(`${n++}. Откладывай хотя бы ${fmt(Math.round(totalI*0.1))} тг/мес (10% от дохода).`);
+    if(tot.cafe&&totalE>0&&tot.cafe/totalE>0.1) L.push(`${n++}. Кафе/рестораны ${Math.round(tot.cafe/totalE*100)}% — готовка дома сэкономит ~${fmt(Math.round(tot.cafe*0.4))} тг.`);
+    if(tot.credit&&totalI>0&&tot.credit/totalI>0.3) L.push(`${n++}. Кредитная нагрузка высокая. Попробуй рефинансировать или погасить досрочно.`);
+    if(totalI>0) L.push(`${n++}. Правило 50/30/20: нужды ${fmt(Math.round(totalI*0.5))} / желания ${fmt(Math.round(totalI*0.3))} / сбережения ${fmt(Math.round(totalI*0.2))} тг.`);
     L.push('');
-    const allKeys=[...new Set([...allExpKeys,...allIncKeys])].sort();
+
+    // ── ЦЕЛЬ НАКОПЛЕНИЯ ──
+    if(S.goal.amount>0&&S.goal.name){
+      L.push(`🎯 ЦЕЛЬ: ${S.goal.name}`);
+      const target=S.goal.amount;
+      const monthlySave=Math.max(0,bal);
+      if(monthlySave>0){
+        const months=Math.ceil(target/monthlySave);
+        const date=new Date();date.setMonth(date.getMonth()+months);
+        L.push(`  Нужно: ${fmt(target)} тг`);
+        L.push(`  Откладываешь сейчас: ${fmt(monthlySave)} тг/мес`);
+        L.push(`  Накопишь за: ${months} мес. (примерно ${MONTHS[date.getMonth()]} ${date.getFullYear()})`);
+        const faster=Math.round(totalE*0.1);
+        L.push(`  Сократив расходы на 10% (${fmt(faster)} тг/мес) → за ${Math.ceil(target/(monthlySave+faster))} мес.`);
+      } else {
+        L.push(`  Сначала выйди в плюс по балансу — сейчас копить не получится.`);
+      }
+      L.push('');
+    }
+
+    // ── ТРЕНД ──
     if(allKeys.length>=2){
       L.push('📈 ТРЕНД ПО МЕСЯЦАМ');
-      allKeys.forEach(k=>{const[y,m]=k.split('-');const e=(S.expenses[k]||[]).reduce((s,x)=>s+x.amt,0);const i=(S.incomes[k]||[]).reduce((s,x)=>s+x.amt,0);const b=i-e;L.push(`${MONTHS[+m].slice(0,3)} ${y}: ↑${fmt(i)} ↓${fmt(e)} = ${b>=0?'+':''}${fmt(b)} тг`);});
+      allKeys.slice(-6).forEach(k=>{
+        const[y,m]=k.split('-');
+        const e=(S.expenses[k]||[]).reduce((s,x)=>s+x.amt,0);
+        const i=(S.incomes[k]||[]).reduce((s,x)=>s+x.amt,0);
+        const b=i-e;
+        L.push(`${MONTHS[+m].slice(0,3)} ${y}: ↑${fmt(i)} ↓${fmt(e)} ${b>=0?'=+':'='}${fmt(b)} тг`);
+      });
       L.push('');
     }
-    L.push('🎯 ПЛАН НА СЛЕДУЮЩИЙ МЕСЯЦ');
+
+    // ── ПЛАН НА СЛЕД МЕСЯЦ ──
+    L.push('🗓 ПЛАН НА СЛЕДУЮЩИЙ МЕСЯЦ');
     const avgE=allExpKeys.length?Math.round(allExpKeys.reduce((s,k)=>s+(S.expenses[k]||[]).reduce((a,x)=>a+x.amt,0),0)/allExpKeys.length):totalE;
     const avgI=allIncKeys.length?Math.round(allIncKeys.reduce((s,k)=>s+(S.incomes[k]||[]).reduce((a,x)=>a+x.amt,0),0)/allIncKeys.length):totalI;
-    L.push(`Целевые доходы: ${fmt(avgI)} тг`);L.push(`Целевые расходы: ${fmt(Math.round(avgE*0.9))} тг (−10%)`);L.push(`Сбережения: ${fmt(Math.round(avgI*0.2))} тг (20%)`);
+    L.push(`  Целевые доходы:   ${fmt(avgI)} тг`);
+    L.push(`  Целевые расходы:  ${fmt(Math.round(avgE*0.9))} тг (−10%)`);
+    L.push(`  Цель сбережений:  ${fmt(Math.round(avgI*0.2))} тг (20%)`);
+
     setState({analysis:L.join('\n'),loading:false});
   },400);
 }
@@ -701,6 +793,13 @@ function render(){
     `:''}
 
     ${S.tab==='analysis'?`
+      <div class="card" style="margin-bottom:14px">
+        <span class="lbl">🎯 ЦЕЛЬ НАКОПЛЕНИЯ (необязательно)</span>
+        <div class="grid2" style="gap:10px">
+          <input class="inp" id="goalName" placeholder="Что копишь? (авто, путешествие...)" value="${S.goal.name}"/>
+          <input class="inp" type="number" inputmode="decimal" id="goalAmt" placeholder="Сумма (тг)" value="${S.goal.amount||''}"/>
+        </div>
+      </div>
       <button class="btn" id="analyzeBtn" style="width:100%;background:${S.loading?'#1e2a3a':'linear-gradient(135deg,#f59e0b,#fbbf24)'};color:${S.loading?'#64748b':'#0f1117'};border:none;border-radius:10px;padding:16px;font-size:15px;font-weight:700;cursor:${S.loading?'not-allowed':'pointer'};margin-bottom:16px">${S.loading?'⏳ Анализирую...':'🤖 Полный финансовый анализ'}</button>
       ${!S.analysis&&!S.loading?'<div class="empty">Нажми кнопку — получишь полный анализ<br>доходов, расходов и советы по накоплению</div>':''}
       ${S.loading?'<div class="empty">⚙️ Считаю данные...</div>':''}
@@ -742,7 +841,13 @@ function render(){
 
   // Analysis
   const analyzeBtn=document.getElementById('analyzeBtn');
-  if(analyzeBtn)analyzeBtn.onclick=()=>{if(!S.loading)doAnalysis();};
+  if(analyzeBtn)analyzeBtn.onclick=()=>{
+    if(S.loading) return;
+    const gn=document.getElementById('goalName')?.value||'';
+    const ga=Number(document.getElementById('goalAmt')?.value||0);
+    setState({goal:{name:gn,amount:ga}});
+    setTimeout(doAnalysis,0);
+  };
 
   // CSV
   const dropZone=document.getElementById('dropZone'),fileInp=document.getElementById('fileInp');
