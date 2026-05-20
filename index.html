@@ -29,19 +29,28 @@ const MONTHS = ['Январь','Февраль','Март','Апрель','Ма�
 const COLORS = ['#4ade80','#fb923c','#60a5fa','#a78bfa','#f472b6','#34d399','#f9a8d4','#f87171','#a3e635','#fcd34d','#fb7185','#94a3b8','#fbbf24','#38bdf8','#e879f9','#f97316'];
 
 const DEFAULT_EXP = [
-  {id:'food',     e:'🛒',n:'Продукты',       c:'#4ade80',k:['продукт','мясо','овощ','фрукт','хоз','барана','ас ','қонақ','құрт']},
-  {id:'cafe',     e:'☕',n:'Кафе/Рестораны',  c:'#fb923c',k:['кофе','кафе','ресторан','самса','пирожк','морожен','обед','ужин','донер','сендвич','еда','напит']},
-  {id:'transport',e:'🚗',n:'Транспорт',       c:'#60a5fa',k:['такси','бензин','парковк','заправк','авто','паркинг']},
-  {id:'housing',  e:'🏠',n:'Жильё/ЖКХ',      c:'#a78bfa',k:['коммунал','жкх','аренда','квартира','электр','тариф','билайн']},
-  {id:'health',   e:'💊',n:'Здоровье',        c:'#f472b6',k:['аптека','врач','больниц','медицин','лекарств','гигиен','зубн','стрижк','спа','баня']},
-  {id:'entertain',e:'🎮',n:'Развлечения',     c:'#34d399',k:['кино','театр','спорт','велик']},
-  {id:'gifts',    e:'🎁',n:'Подарки/She',     c:'#f9a8d4',k:['цветы','she','знакомств','подарок','сүйінші','праздник']},
-  {id:'credit',   e:'💳',n:'Кредиты',         c:'#f87171',k:['кредит','каспи кред','займ','рассрочк']},
-  {id:'charity',  e:'🕌',n:'Пожертвования',   c:'#a3e635',k:['пожертвован','садақа']},
-  {id:'family',   e:'👨‍👩‍👧',n:'Семья/Родные',  c:'#fcd34d',k:['ali','we,','мама','ата','родители']},
-  {id:'fines',    e:'🚨',n:'Штрафы',          c:'#fb7185',k:['штраф']},
-  {id:'other',    e:'💼',n:'Прочее',           c:'#94a3b8',k:[]},
-];
+  {id:'food',     e:'🛒',n:'Продукты',        c:'#4ade80',k:['продукт','мясо','овощ','фрукт','хоз','барана','қонақ','құрт','ірімшік']},
+  {id:'cafe',     e:'☕',n:'Кафе/Рестораны',   c:'#fb923c',k:['кофе','кафе','ресторан','самса','пирожк','морожен','обед','ужин','донер','сендвич','квас','еда','напит','перекус','стейк','бургер','лагман','плов','суши']},
+  {id:'as',       e:'🍖',n:'Ас (той)',          c:'#f97316',k:['ас,','той','дастархан','қонақасы','конакасы']},
+  {id:'transport',e:'🚗',n:'Транспорт/Бензин', c:'#60a5fa',k:['такси','бензин','парковк','заправк','паркинг']},
+  {id:'auto',     e:'🔧',n:'Авто (ремонт)',    c:'#38bdf8',k:['авто','замена','масло','геометр','суппорт','мойка','страховк','техосмотр','незамерзайк','шина','перебортовк','рейка','катушк','лобовое','вентилятор','кузов','туманник','говорит']},
+  {id:'housing',  e:'🏠',n:'Жильё/ЖКХ',       c:'#a78bfa',k:['коммунал','жкх','аренда','квартира','электр','тариф','билайн','газ,']},
+  {id:'repair',   e:'🔨',n:'Ремонт дома',      c:'#c084fc',k:['ремонт','электрик','сантехник','кабель','розетк','включател','лампа','прожектор','гофра','сифон','душевая','клей монт','шпатель','затирк','пена,','плитк','крайник','зажим']},
+  {id:'health',   e:'💊',n:'Здоровье/Аптека', c:'#f472b6',k:['аптека','врач','больниц','медицин','лекарств','стоматолог','немисил','витамин']},
+  {id:'hygiene',  e:'🪥',n:'Гигиена',          c:'#34d399',k:['гигиен','зубн','стрижк','парихмах','бритва','шампун','гель','мочалк','салфетк','ухочистк']},
+  {id:'spa',      e:'🛁',n:'Спа/Баня',         c:'#22d3ee',k:['спа','баня','сауна']},
+  {id:'clothes',  e:'👔',n:'Одежда',           c:'#fbbf24',k:['одежда','одежд','куртк','слакс','футболк','кофта','ткань']},
+  {id:'gadgets',  e:'📱',n:'Техника/Гаджеты', c:'#818cf8',k:['бытовые','термос','чехол','стекло','вешалк','модулятор']},
+  {id:'she',      e:'💕',n:'She',              c:'#f9a8d4',k:['she,','she ']},
+  {id:'gifts',    e:'🎁',n:'Подарки/Коримдік', c:'#fb7185',k:['подарок','подарки','день рожд','korimdik','коримдик','сүйінші','сюрприз']},
+  {id:'family',   e:'👨‍👩‍👧',n:'Семья',          c:'#fcd34d',k:['ali,','ali ','alibi','мако','we,','we ','мама','ата','родители','bauka','qor']},
+  {id:'credit',   e:'💳',n:'Кредиты/Займы',   c:'#f87171',k:['кредит','каспи кред','займ','рассрочк','халык','комиссия']},
+  {id:'charity',  e:'🕌',n:'Пожертвования',    c:'#a3e635',k:['пожертвован','садақа','жарапазан']},
+  {id:'subscr',   e:'📡',n:'Тарифы/Подписки', c:'#94a3b8',k:['тариф','подписк','антивирус','gemini','джемини','клауд','active','актив','интернет']},
+  {id:'fines',    e:'🚨',n:'Штрафы',           c:'#ef4444',k:['штраф']},
+  {id:'entertain',e:'🎮',n:'Развлечения',      c:'#e879f9',k:['кино','театр','спорт','велик','книга']},
+  {id:'other',    e:'💼',n:'Прочее',            c:'#64748b',k:[]},
+]
 const DEFAULT_INC = [
   {id:'salary',   e:'💼',n:'Зарплата',        c:'#4ade80',k:['зарплата','оклад','salary']},
   {id:'freelance',e:'💻',n:'Фриланс',         c:'#60a5fa',k:['фриланс','freelance','подработка']},
@@ -101,6 +110,7 @@ let S = {
   csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
   analysis:'', loading:false, syncing:false,
   editEntry:null, // {fid, type, cat, amt, note}
+  ghostCats:{}, // deleted categories kept for display
   settings:{
     activeType:'expense',
     editId:null,
@@ -110,8 +120,18 @@ let S = {
 };
 
 function setState(p){Object.assign(S,typeof p==='function'?p(S):p);render();}
-function getExpCat(id){return S.expCats.find(c=>c.id===id)||S.expCats[S.expCats.length-1]||{e:'💼',n:'Прочее',c:'#94a3b8'};}
-function getIncCat(id){return S.incCats.find(c=>c.id===id)||S.incCats[S.incCats.length-1]||{e:'💰',n:'Прочее',c:'#94a3b8'};}
+function getExpCat(id){
+  return S.expCats.find(c=>c.id===id)
+    || (S.ghostCats[id] ? {...S.ghostCats[id], deleted:true} : null)
+    || S.expCats.find(c=>c.id==='other')
+    || {e:'💼',n:'Прочее',c:'#64748b',id:'other'};
+}
+function getIncCat(id){
+  return S.incCats.find(c=>c.id===id)
+    || (S.ghostCats[id] ? {...S.ghostCats[id], deleted:true} : null)
+    || S.incCats.find(c=>c.id==='other_i')
+    || {e:'💰',n:'Прочее',c:'#64748b',id:'other_i'};
+}
 function mk(){return `${S.year}-${S.month}`;}
 function expData(){return S.expenses[mk()]||[];}
 function incData(){return S.incomes[mk()]||[];}
@@ -182,10 +202,14 @@ async function updateCategory(catData){
 }
 
 async function deleteCategory(cat){
+  if (!confirm(`Удалить категорию "${cat.n}"?\n\nСтарые записи останутся с этой категорией (будет показано серым).`)) return;
   setState({syncing:true});
-  if(cat.fid) await deleteDoc(doc(db,'categories',cat.fid));
-  if(cat.type==='expense') S.expCats=S.expCats.filter(c=>c.id!==cat.id);
-  else S.incCats=S.incCats.filter(c=>c.id!==cat.id);
+  // Save to ghostCats so old records can still display the name
+  S.ghostCats = {...S.ghostCats, [cat.id]: {...cat, deleted:true}};
+  // Remove from active list
+  if (cat.fid) await deleteDoc(doc(db,'categories',cat.fid));
+  if (cat.type==='expense') S.expCats = S.expCats.filter(c=>c.id!==cat.id);
+  else S.incCats = S.incCats.filter(c=>c.id!==cat.id);
   setState({syncing:false});
 }
 
@@ -459,7 +483,7 @@ function render(){
             <div style="display:flex;align-items:center;gap:10px;flex:1">
               <div class="dot" style="background:${c.c}"></div>
               <div>
-                <div style="font-size:12px;color:#64748b">${c.e} ${c.n}</div>
+                <div style="font-size:12px;color:${c.deleted?'#475569':'#64748b'}">${c.e} ${c.n}${c.deleted?' ✕':''}</div>
                 ${item.note?`<div style="font-size:12px;color:#94a3b8">${item.note}</div>`:''}
               </div>
             </div>
@@ -511,7 +535,7 @@ function render(){
             <div style="display:flex;align-items:center;gap:10px;flex:1">
               <div class="dot" style="background:${c.c}"></div>
               <div>
-                <div style="font-size:12px;color:#64748b">${c.e} ${c.n}</div>
+                <div style="font-size:12px;color:${c.deleted?'#475569':'#64748b'}">${c.e} ${c.n}${c.deleted?' ✕':''}</div>
                 ${item.note?`<div style="font-size:12px;color:#94a3b8">${item.note}</div>`:''}
               </div>
             </div>
@@ -649,11 +673,10 @@ function render(){
 
   // Delete cat btns
   document.querySelectorAll('[data-del-cat]').forEach(b=>b.onclick=()=>{
-    if(!confirm('Удалить категорию?'))return;
     const type=b.dataset.catType;
     const cats=type==='expense'?S.expCats:S.incCats;
     const cat=cats.find(c=>c.id===b.dataset.delCat);
-    if(cat)deleteCategory({...cat,type:type==='expense'?'expense':'income'});
+    if(cat) deleteCategory({...cat,type:type==='expense'?'expense':'income'});
   });
 
   // Cancel edit
