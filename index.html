@@ -519,19 +519,19 @@ function render(){
   app.innerHTML=`
   <div style="min-height:100vh;padding-bottom:40px">
     ${S.syncing?'<div class="sync-bar">💾 Сохранение...</div>':''}
-    <div class="header-box">
-      <div>
-        <div class="header-label">Личный финансовый дневник</div>
+    <div class="header-box" style="align-items:flex-start">
+      <div style="flex:1;min-width:0">
+        <div class="header-label" style="white-space:nowrap">Личный финансовый дневник</div>
         <div class="header-title">💰 ФинДиректор</div>
       </div>
-      <div style="text-align:right;cursor:pointer;user-select:none" id="balanceToggle">
-        <div style="font-size:10px;color:#64748b;margin-bottom:2px">БАЛАНС МЕСЯЦ ${S.hideBalance?'🙈':'👁'}</div>
-        <div style="font-size:20px;font-weight:700;color:${S.hideBalance?'#475569':bal>0?'#4ade80':bal<0?'#f87171':'#334155'}">
+      <div style="text-align:right;cursor:pointer;user-select:none;min-width:140px;flex-shrink:0" id="balanceToggle">
+        <div style="font-size:10px;color:#64748b;margin-bottom:2px;white-space:nowrap">БАЛАНС МЕСЯЦ ${S.hideBalance?'🙈':'👁'}</div>
+        <div style="font-size:20px;font-weight:700;color:${S.hideBalance?'#475569':bal>0?'#4ade80':bal<0?'#f87171':'#334155'};white-space:nowrap;min-height:28px;line-height:1.3">
           ${S.hideBalance
             ? '•••••• <span style=\"font-size:11px;color:#475569\">тг</span>'
             : (bal>=0?'+':'')+fmt(bal)+' <span style=\"font-size:11px;color:#64748b\">тг</span>'}
         </div>
-        <div style="font-size:11px;color:#64748b">
+        <div style="font-size:11px;color:#64748b;white-space:nowrap;min-height:16px">
           ${S.hideBalance ? '↑ ••••• ↓ •••••' : '↑'+fmt(totalI)+' ↓'+fmt(totalE)}
         </div>
       </div>
