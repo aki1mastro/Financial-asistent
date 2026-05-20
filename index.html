@@ -80,6 +80,17 @@ function fmtDisplay(iso) {
   } catch { return ''; }
 }
 
+function sortEntries(entries) {
+  const arr = [...entries];
+  switch(S.sortBy) {
+    case 'date_desc': return arr.sort((a,b) => new Date(b.date) - new Date(a.date));
+    case 'date_asc':  return arr.sort((a,b) => new Date(a.date) - new Date(b.date));
+    case 'amt_desc':  return arr.sort((a,b) => b.amt - a.amt);
+    case 'amt_asc':   return arr.sort((a,b) => a.amt - b.amt);
+    default: return arr;
+  }
+}
+
 function guessCat(cat, note, cats) {
   const t = ((cat||'')+' '+(note||'')).toLowerCase();
   for (const c of cats) { if ((c.k||[]).some(k=>t.includes(k))) return c.id; }
@@ -124,6 +135,7 @@ let S = {
   month:now.getMonth(), year:now.getFullYear(),
   tab:'expenses',
   expForm:{cat:'food',amt:'',note:'',date:''},
+  sortBy:'date_desc', // date_desc | date_asc | amt_desc | amt_asc
   incForm:{cat:'salary',amt:'',note:'',date:''},
   csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
   analysis:'', loading:false, syncing:false, hideBalance:false,
@@ -549,9 +561,17 @@ function render(){
         <input class="inp" type="datetime-local" id="eDate" value="${S.expForm.date||nowLocal()}" style="font-size:13px;color:#94a3b8"/>
       </div>
       ${totalE>0?`<div class="grid2" style="margin-bottom:14px">${S.expCats.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).map(c=>`<div class="catcard" style="border-left:3px solid ${c.c}"><span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span><div style="text-align:right"><div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(tot[c.id])} тг</div><div style="font-size:10px;color:#475569">${Math.round(tot[c.id]/totalE*100)}%</div></div></div>`).join('')}</div>`:''}
-      <span class="lbl">ЗАПИСИ — ${MONTHS[S.month]} (${eData.length})</span>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span class="lbl" style="margin:0">ЗАПИСИ — ${MONTHS[S.month]} (${eData.length})</span>
+        <div style="display:flex;gap:4px">
+          <button class="sort-btn${S.sortBy==='date_desc'?' sort-active':''}" data-sort="date_desc">🕐 Новые</button>
+          <button class="sort-btn${S.sortBy==='date_asc'?' sort-active':''}" data-sort="date_asc">🕐 Старые</button>
+          <button class="sort-btn${S.sortBy==='amt_desc'?' sort-active':''}" data-sort="amt_desc">↑ Сумма</button>
+          <button class="sort-btn${S.sortBy==='amt_asc'?' sort-active':''}" data-sort="amt_asc">↓ Сумма</button>
+        </div>
+      </div>
       ${eData.length===0?`<div class="empty">Нет расходов.<br>Добавь вручную или импортируй CSV.</div>`:
-        [...eData].reverse().map(item=>{
+        sortEntries(eData).map(item=>{
           const c=getExpCat(item.cat);
           const isEdit=S.editEntry?.fid===item.fid&&S.editEntry?.type==='exp';
           if(isEdit){
@@ -602,9 +622,17 @@ function render(){
         </div>
       </div>
       ${totalI>0?`<div class="card" style="margin-bottom:14px;border-color:#4ade8030"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span class="lbl" style="margin:0">ИТОГО ДОХОДОВ</span><span style="font-size:20px;font-weight:700;color:#4ade80">${fmt(totalI)} тг</span></div><div class="grid2">${S.incCats.filter(c=>incBycat[c.id]).map(c=>`<div class="catcard" style="border-left:3px solid ${c.c}"><span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span><div style="text-align:right"><div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(incBycat[c.id])} тг</div><div style="font-size:10px;color:#475569">${Math.round(incBycat[c.id]/totalI*100)}%</div></div></div>`).join('')}</div></div>`:''}
-      <span class="lbl">ЗАПИСИ — ${MONTHS[S.month]} (${iData.length})</span>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span class="lbl" style="margin:0">ЗАПИСИ — ${MONTHS[S.month]} (${iData.length})</span>
+        <div style="display:flex;gap:4px">
+          <button class="sort-btn${S.sortBy==='date_desc'?' sort-active':''}" data-sort="date_desc">🕐 Новые</button>
+          <button class="sort-btn${S.sortBy==='date_asc'?' sort-active':''}" data-sort="date_asc">🕐 Старые</button>
+          <button class="sort-btn${S.sortBy==='amt_desc'?' sort-active':''}" data-sort="amt_desc">↑ Сумма</button>
+          <button class="sort-btn${S.sortBy==='amt_asc'?' sort-active':''}" data-sort="amt_asc">↓ Сумма</button>
+        </div>
+      </div>
       ${iData.length===0?`<div class="empty">Нет доходов за этот месяц.</div>`:
-        [...iData].reverse().map(item=>{
+        sortEntries(iData).map(item=>{
           const c=getIncCat(item.cat);
           const isEdit=S.editEntry?.fid===item.fid&&S.editEntry?.type==='inc';
           if(isEdit){
@@ -684,6 +712,7 @@ function render(){
 
   // EVENTS
   document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>setState({month:+b.dataset.m}));
+  document.querySelectorAll('[data-sort]').forEach(b=>b.onclick=()=>setState({sortBy:b.dataset.sort}));
   const balToggle=document.getElementById('balanceToggle');
   if(balToggle) balToggle.onclick=()=>setState({hideBalance:!S.hideBalance});
   const prevYear=document.getElementById('prevYear');if(prevYear)prevYear.onclick=()=>setState({year:S.year-1});
