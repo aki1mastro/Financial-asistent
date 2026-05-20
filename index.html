@@ -100,6 +100,7 @@ let S = {
   incForm:{cat:'salary',amt:'',note:''},
   csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
   analysis:'', loading:false, syncing:false,
+  editEntry:null, // {fid, type, cat, amt, note}
   settings:{
     activeType:'expense',
     editId:null,
@@ -217,6 +218,17 @@ async function addIncome(){
 }
 async function delExpense(fid){setState({syncing:true});await deleteDoc(doc(db,'expenses',fid));S.expenses={...S.expenses,[mk()]:S.expenses[mk()].filter(e=>e.fid!==fid)};setState({syncing:false});}
 async function delIncome(fid){setState({syncing:true});await deleteDoc(doc(db,'incomes',fid));S.incomes={...S.incomes,[mk()]:S.incomes[mk()].filter(e=>e.fid!==fid)};setState({syncing:false});}
+
+async function updateEntry(type, fid, patch){
+  setState({syncing:true});
+  await updateDoc(doc(db, type==='exp'?'expenses':'incomes', fid), patch);
+  if(type==='exp'){
+    S.expenses={...S.expenses,[mk()]:S.expenses[mk()].map(e=>e.fid===fid?{...e,...patch}:e)};
+  } else {
+    S.incomes={...S.incomes,[mk()]:S.incomes[mk()].map(e=>e.fid===fid?{...e,...patch}:e)};
+  }
+  setState({syncing:false, editEntry:null});
+}
 
 function handleFile(file){
   if(!file)return;const reader=new FileReader();
@@ -418,7 +430,41 @@ function render(){
       ${totalE>0?`<div class="grid2" style="margin-bottom:14px">${S.expCats.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).map(c=>`<div class="catcard" style="border-left:3px solid ${c.c}"><span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span><div style="text-align:right"><div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(tot[c.id])} тг</div><div style="font-size:10px;color:#475569">${Math.round(tot[c.id]/totalE*100)}%</div></div></div>`).join('')}</div>`:''}
       <span class="lbl">ЗАПИСИ — ${MONTHS[S.month]} (${eData.length})</span>
       ${eData.length===0?`<div class="empty">Нет расходов.<br>Добавь вручную или импортируй CSV.</div>`:
-        [...eData].reverse().map(item=>{const c=getExpCat(item.cat);return`<div class="entry"><div style="display:flex;align-items:center;gap:10px"><div class="dot" style="background:${c.c}"></div><div><div style="font-size:12px;color:#64748b">${c.e} ${c.n}</div>${item.note?`<div style="font-size:12px;color:#94a3b8">${item.note}</div>`:''}</div></div><div style="display:flex;align-items:center;gap:10px;flex-shrink:0"><span style="font-weight:700;color:${c.c};font-size:14px">${fmt(item.amt)} тг</span><button class="del-btn" data-type="exp" data-fid="${item.fid}">×</button></div></div>`;}).join('')}
+        [...eData].reverse().map(item=>{
+          const c=getExpCat(item.cat);
+          const isEdit=S.editEntry?.fid===item.fid&&S.editEntry?.type==='exp';
+          if(isEdit){
+            return`<div class="entry" style="flex-direction:column;align-items:stretch;gap:10px">
+              <div style="display:flex;gap:8px;margin-bottom:4px">
+                <select class="inp edit-cat-sel" data-fid="${item.fid}" data-etype="exp" style="flex:1">
+                  ${S.expCats.map(cat=>`<option value="${cat.id}"${cat.id===S.editEntry.cat?' selected':''}>${cat.e} ${cat.n}</option>`).join('')}
+                </select>
+              </div>
+              <div style="display:flex;gap:8px">
+                <input class="inp edit-amt-inp" data-fid="${item.fid}" type="number" inputmode="decimal" value="${S.editEntry.amt}" style="width:120px"/>
+                <input class="inp edit-note-inp" data-fid="${item.fid}" value="${S.editEntry.note||''}" placeholder="Заметка" style="flex:1"/>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="btn2" style="flex:1;padding:8px" data-cancel-entry="1">Отмена</button>
+                <button class="btn" style="flex:2;padding:8px" data-save-entry="${item.fid}" data-save-type="exp">💾 Сохранить</button>
+              </div>
+            </div>`;
+          }
+          return`<div class="entry entry-tap" data-open-edit="${item.fid}" data-open-type="exp" data-open-cat="${item.cat}" data-open-amt="${item.amt}" data-open-note="${(item.note||'').replace(/"/g,'&quot;')}">
+            <div style="display:flex;align-items:center;gap:10px;flex:1">
+              <div class="dot" style="background:${c.c}"></div>
+              <div>
+                <div style="font-size:12px;color:#64748b">${c.e} ${c.n}</div>
+                ${item.note?`<div style="font-size:12px;color:#94a3b8">${item.note}</div>`:''}
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+              <span style="font-weight:700;color:${c.c};font-size:14px">${fmt(item.amt)} тг</span>
+              <span style="color:#475569;font-size:12px">✏️</span>
+              <button class="del-btn" data-type="exp" data-fid="${item.fid}">×</button>
+            </div>
+          </div>`;
+        }).join('')}
     `:''}
 
     ${S.tab==='incomes'?`
@@ -436,7 +482,41 @@ function render(){
       ${totalI>0?`<div class="card" style="margin-bottom:14px;border-color:#4ade8030"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span class="lbl" style="margin:0">ИТОГО ДОХОДОВ</span><span style="font-size:20px;font-weight:700;color:#4ade80">${fmt(totalI)} тг</span></div><div class="grid2">${S.incCats.filter(c=>incBycat[c.id]).map(c=>`<div class="catcard" style="border-left:3px solid ${c.c}"><span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span><div style="text-align:right"><div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(incBycat[c.id])} тг</div><div style="font-size:10px;color:#475569">${Math.round(incBycat[c.id]/totalI*100)}%</div></div></div>`).join('')}</div></div>`:''}
       <span class="lbl">ЗАПИСИ — ${MONTHS[S.month]} (${iData.length})</span>
       ${iData.length===0?`<div class="empty">Нет доходов за этот месяц.</div>`:
-        [...iData].reverse().map(item=>{const c=getIncCat(item.cat);return`<div class="entry"><div style="display:flex;align-items:center;gap:10px"><div class="dot" style="background:${c.c}"></div><div><div style="font-size:12px;color:#64748b">${c.e} ${c.n}</div>${item.note?`<div style="font-size:12px;color:#94a3b8">${item.note}</div>`:''}</div></div><div style="display:flex;align-items:center;gap:10px;flex-shrink:0"><span style="font-weight:700;color:${c.c};font-size:14px">+${fmt(item.amt)} тг</span><button class="del-btn" data-type="inc" data-fid="${item.fid}">×</button></div></div>`;}).join('')}
+        [...iData].reverse().map(item=>{
+          const c=getIncCat(item.cat);
+          const isEdit=S.editEntry?.fid===item.fid&&S.editEntry?.type==='inc';
+          if(isEdit){
+            return`<div class="entry" style="flex-direction:column;align-items:stretch;gap:10px">
+              <div style="display:flex;gap:8px;margin-bottom:4px">
+                <select class="inp edit-cat-sel" data-fid="${item.fid}" data-etype="inc" style="flex:1">
+                  ${S.incCats.map(cat=>`<option value="${cat.id}"${cat.id===S.editEntry.cat?' selected':''}>${cat.e} ${cat.n}</option>`).join('')}
+                </select>
+              </div>
+              <div style="display:flex;gap:8px">
+                <input class="inp edit-amt-inp" data-fid="${item.fid}" type="number" inputmode="decimal" value="${S.editEntry.amt}" style="width:120px"/>
+                <input class="inp edit-note-inp" data-fid="${item.fid}" value="${S.editEntry.note||''}" placeholder="Заметка" style="flex:1"/>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="btn2" style="flex:1;padding:8px" data-cancel-entry="1">Отмена</button>
+                <button class="btn" style="flex:2;padding:8px;background:#4ade80;color:#0f1117" data-save-entry="${item.fid}" data-save-type="inc">💾 Сохранить</button>
+              </div>
+            </div>`;
+          }
+          return`<div class="entry entry-tap" data-open-edit="${item.fid}" data-open-type="inc" data-open-cat="${item.cat}" data-open-amt="${item.amt}" data-open-note="${(item.note||'').replace(/"/g,'&quot;')}">
+            <div style="display:flex;align-items:center;gap:10px;flex:1">
+              <div class="dot" style="background:${c.c}"></div>
+              <div>
+                <div style="font-size:12px;color:#64748b">${c.e} ${c.n}</div>
+                ${item.note?`<div style="font-size:12px;color:#94a3b8">${item.note}</div>`:''}
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+              <span style="font-weight:700;color:${c.c};font-size:14px">+${fmt(item.amt)} тг</span>
+              <span style="color:#475569;font-size:12px">✏️</span>
+              <button class="del-btn" data-type="inc" data-fid="${item.fid}">×</button>
+            </div>
+          </div>`;
+        }).join('')}
     `:''}
 
     ${S.tab==='charts'?`
@@ -509,6 +589,24 @@ function render(){
   const csvBack=document.getElementById('csvBack');if(csvBack)csvBack.onclick=()=>setState({csv:{...S.csv,step:S.csv.headers.length?'mapping':'idle'}});
   const csvPreviewBtn=document.getElementById('csvPreviewBtn');if(csvPreviewBtn)csvPreviewBtn.onclick=()=>{if(S.csv.map.amt)buildPreview();};
   const csvImportBtn=document.getElementById('csvImportBtn');if(csvImportBtn)csvImportBtn.onclick=importCSV;
+
+  // ENTRY EDIT EVENTS
+  document.querySelectorAll('.entry-tap').forEach(el=>{
+    el.onclick=function(e){
+      if(e.target.classList.contains('del-btn')||e.target.closest('.del-btn')) return;
+      setState({editEntry:{fid:el.dataset.openEdit,type:el.dataset.openType,cat:el.dataset.openCat,amt:Number(el.dataset.openAmt),note:el.dataset.openNote||''}});
+    };
+  });
+  document.querySelectorAll('[data-cancel-entry]').forEach(b=>b.onclick=e=>{e.stopPropagation();setState({editEntry:null});});
+  document.querySelectorAll('[data-save-entry]').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    const fid=b.dataset.saveEntry, type=b.dataset.saveType;
+    const cat=document.querySelector(`.edit-cat-sel[data-fid="${fid}"]`)?.value||S.editEntry.cat;
+    const amt=Number(document.querySelector(`.edit-amt-inp[data-fid="${fid}"]`)?.value||S.editEntry.amt);
+    const note=document.querySelector(`.edit-note-inp[data-fid="${fid}"]`)?.value??S.editEntry.note;
+    if(amt>0) updateEntry(type,fid,{cat,amt,note});
+  });
+  document.querySelectorAll('.edit-cat-sel').forEach(sel=>sel.onchange=e=>{e.stopPropagation();setState({editEntry:{...S.editEntry,cat:e.target.value}});});
 
   // SETTINGS EVENTS
   document.querySelectorAll('[data-set-type]').forEach(b=>b.onclick=()=>setState({settings:{...S.settings,activeType:b.dataset.setType,editId:null,editCat:null,newCat:{...S.settings.newCat,type:b.dataset.setType}}}));
