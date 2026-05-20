@@ -67,6 +67,18 @@ const DEFAULT_INC = [
 ];
 
 const fmt = n => new Intl.NumberFormat('ru-RU').format(Math.round(n));
+function nowLocal() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fmtDisplay(iso) {
+  try {
+    const d = new Date(iso);
+    const pad = n => String(n).padStart(2,'0');
+    return `${pad(d.getDate())}.${pad(d.getMonth()+1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch { return ''; }
+}
 
 function guessCat(cat, note, cats) {
   const t = ((cat||'')+' '+(note||'')).toLowerCase();
@@ -111,8 +123,8 @@ let S = {
   expCats:[...DEFAULT_EXP], incCats:[...DEFAULT_INC],
   month:now.getMonth(), year:now.getFullYear(),
   tab:'expenses',
-  expForm:{cat:'food',amt:'',note:''},
-  incForm:{cat:'salary',amt:'',note:''},
+  expForm:{cat:'food',amt:'',note:'',date:''},
+  incForm:{cat:'salary',amt:'',note:'',date:''},
   csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
   analysis:'', loading:false, syncing:false, hideBalance:false,
   editEntry:null, // {fid, type, cat, amt, note}
@@ -263,17 +275,21 @@ async function resetCategoriesToDefault(type) {
 async function addExpense(){
   const amt=Number(S.expForm.amt);if(!amt||amt<=0)return;
   setState({syncing:true});
-  const entry={cat:S.expForm.cat,amt,note:S.expForm.note,date:new Date().toISOString(),monthKey:mk()};
+  const entryDate = S.expForm.date ? new Date(S.expForm.date) : new Date();
+  const entryMk = `${entryDate.getFullYear()}-${entryDate.getMonth()}`;
+  const entry={cat:S.expForm.cat,amt,note:S.expForm.note,date:entryDate.toISOString(),monthKey:entryMk};
   const ref=await addDoc(collection(db,'expenses'),entry);entry.fid=ref.id;
-  S.expenses={...S.expenses,[mk()]:[...(S.expenses[mk()]||[]),entry]};
+  S.expenses={...S.expenses,[entryMk]:[...(S.expenses[entryMk]||[]),entry]};
   setState({expForm:{...S.expForm,amt:'',note:''},syncing:false});
 }
 async function addIncome(){
   const amt=Number(S.incForm.amt);if(!amt||amt<=0)return;
   setState({syncing:true});
-  const entry={cat:S.incForm.cat,amt,note:S.incForm.note,date:new Date().toISOString(),monthKey:mk()};
+  const entryDate = S.incForm.date ? new Date(S.incForm.date) : new Date();
+  const entryMk = `${entryDate.getFullYear()}-${entryDate.getMonth()}`;
+  const entry={cat:S.incForm.cat,amt,note:S.incForm.note,date:entryDate.toISOString(),monthKey:entryMk};
   const ref=await addDoc(collection(db,'incomes'),entry);entry.fid=ref.id;
-  S.incomes={...S.incomes,[mk()]:[...(S.incomes[mk()]||[]),entry]};
+  S.incomes={...S.incomes,[entryMk]:[...(S.incomes[entryMk]||[]),entry]};
   setState({incForm:{...S.incForm,amt:'',note:''},syncing:false});
 }
 async function delExpense(fid){setState({syncing:true});await deleteDoc(doc(db,'expenses',fid));S.expenses={...S.expenses,[mk()]:S.expenses[mk()].filter(e=>e.fid!==fid)};setState({syncing:false});}
@@ -526,10 +542,11 @@ function render(){
           <select class="inp" id="eCat">${S.expCats.map(c=>`<option value="${c.id}"${c.id===S.expForm.cat?' selected':''}>${c.e} ${c.n}</option>`).join('')}</select>
           <input class="inp" type="number" inputmode="decimal" placeholder="Сумма (тг)" id="eAmt" value="${S.expForm.amt}"/>
         </div>
-        <div style="display:grid;grid-template-columns:1fr auto;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:10px">
           <input class="inp" placeholder="Заметка" id="eNote" value="${S.expForm.note}"/>
           <button class="btn" id="addExpBtn">+ Добавить</button>
         </div>
+        <input class="inp" type="datetime-local" id="eDate" value="${S.expForm.date||nowLocal()}" style="font-size:13px;color:#94a3b8"/>
       </div>
       ${totalE>0?`<div class="grid2" style="margin-bottom:14px">${S.expCats.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).map(c=>`<div class="catcard" style="border-left:3px solid ${c.c}"><span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span><div style="text-align:right"><div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(tot[c.id])} тг</div><div style="font-size:10px;color:#475569">${Math.round(tot[c.id]/totalE*100)}%</div></div></div>`).join('')}</div>`:''}
       <span class="lbl">ЗАПИСИ — ${MONTHS[S.month]} (${eData.length})</span>
@@ -560,6 +577,7 @@ function render(){
               <div>
                 <div style="font-size:12px;color:${c.deleted?'#475569':'#64748b'}">${c.e} ${c.n}${c.deleted?' ✕':''}</div>
                 ${item.note?`<div style="font-size:12px;color:#94a3b8">${item.note}</div>`:''}
+                <div style="font-size:10px;color:#334155;margin-top:1px">${fmtDisplay(item.date)}</div>
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
@@ -612,6 +630,7 @@ function render(){
               <div>
                 <div style="font-size:12px;color:${c.deleted?'#475569':'#64748b'}">${c.e} ${c.n}${c.deleted?' ✕':''}</div>
                 ${item.note?`<div style="font-size:12px;color:#94a3b8">${item.note}</div>`:''}
+                <div style="font-size:10px;color:#334155;margin-top:1px">${fmtDisplay(item.date)}</div>
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
@@ -675,7 +694,7 @@ function render(){
   // Expense form
   const addExpBtn=document.getElementById('addExpBtn');
   if(addExpBtn){
-    addExpBtn.onclick=()=>{setState({expForm:{cat:document.getElementById('eCat').value,amt:document.getElementById('eAmt').value,note:document.getElementById('eNote').value}});setTimeout(addExpense,0);};
+    addExpBtn.onclick=()=>{setState({expForm:{cat:document.getElementById('eCat').value,amt:document.getElementById('eAmt').value,note:document.getElementById('eNote').value,date:document.getElementById('eDate').value}});setTimeout(addExpense,0);};
     document.getElementById('eAmt').onkeydown=e=>{if(e.key==='Enter')addExpBtn.click();};
     document.getElementById('eNote').onkeydown=e=>{if(e.key==='Enter')addExpBtn.click();};
     document.getElementById('eCat').onchange=e=>setState({expForm:{...S.expForm,cat:e.target.value}});
@@ -684,7 +703,7 @@ function render(){
   // Income form
   const addIncBtn=document.getElementById('addIncBtn');
   if(addIncBtn){
-    addIncBtn.onclick=()=>{setState({incForm:{cat:document.getElementById('iCat').value,amt:document.getElementById('iAmt').value,note:document.getElementById('iNote').value}});setTimeout(addIncome,0);};
+    addIncBtn.onclick=()=>{setState({incForm:{cat:document.getElementById('iCat').value,amt:document.getElementById('iAmt').value,note:document.getElementById('iNote').value,date:document.getElementById('iDate').value}});setTimeout(addIncome,0);};
     document.getElementById('iAmt').onkeydown=e=>{if(e.key==='Enter')addIncBtn.click();};
     document.getElementById('iNote').onkeydown=e=>{if(e.key==='Enter')addIncBtn.click();};
     document.getElementById('iCat').onchange=e=>setState({incForm:{...S.incForm,cat:e.target.value}});
