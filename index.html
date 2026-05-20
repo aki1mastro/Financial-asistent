@@ -351,6 +351,36 @@ function BarChart(barData,color='#fbbf24'){
   return`<svg viewBox="0 0 ${W} ${H+16}" width="100%" style="display:block">${bars}${labels}${vals}</svg>`;
 }
 
+function GroupedBarChart(incData, expData) {
+  const W=340, H=130, pad=20, monthW=46, bW=18, gap=2;
+  const allVals=[...incData.map(d=>d.v),...expData.map(d=>d.v)];
+  const max=Math.max(...allVals,1);
+  let bars='',labels='',vals='';
+  incData.forEach((inc,i)=>{
+    const exp=expData[i];
+    const x=pad+i*monthW;
+    // Income bar (left)
+    const iH=inc.v?(inc.v/max)*(H-25):2, iy=H-iH;
+    bars+=`<rect x="${x}" y="${iy}" width="${bW}" height="${iH}" rx="2" fill="#4ade80"/>`;
+    if(inc.v) vals+=`<text x="${x+bW/2}" y="${iy-3}" text-anchor="middle" fill="#4ade80" font-size="8">${inc.v>=1000?Math.round(inc.v/1000)+'k':inc.v}</text>`;
+    // Expense bar (right)
+    const ex=pad+i*monthW+bW+gap;
+    const eH=exp.v?(exp.v/max)*(H-25):2, ey=H-eH;
+    bars+=`<rect x="${ex}" y="${ey}" width="${bW}" height="${eH}" rx="2" fill="#f87171"/>`;
+    if(exp.v) vals+=`<text x="${ex+bW/2}" y="${ey-3}" text-anchor="middle" fill="#f87171" font-size="8">${exp.v>=1000?Math.round(exp.v/1000)+'k':exp.v}</text>`;
+    // Month label
+    labels+=`<text x="${x+bW}" y="${H+12}" text-anchor="middle" fill="#64748b" font-size="10">${inc.n}</text>`;
+    // Balance line
+    const bal=inc.v-exp.v;
+    const balColor=bal>=0?'#4ade80':'#f87171';
+    const balTxt=(bal>=0?'+':'')+( Math.abs(bal)>=1000?Math.round(bal/1000)+'k':bal );
+    labels+=`<text x="${x+bW}" y="${H+23}" text-anchor="middle" fill="${balColor}" font-size="8" font-weight="bold">${balTxt}</text>`;
+  });
+  // Baseline
+  const baseline=`<line x1="${pad}" y1="${H}" x2="${W-pad}" y2="${H}" stroke="#1e2a3a" stroke-width="1"/>`;
+  return`<svg viewBox="0 0 ${W} ${H+28}" width="100%" style="display:block">${baseline}${bars}${vals}${labels}</svg>`;
+}
+
 function renderSettings(){
   const type=S.settings.activeType;
   const cats=type==='expense'?S.expCats:S.incCats;
@@ -563,8 +593,12 @@ function render(){
     ${S.tab==='charts'?`
       <div class="card">
         <span class="lbl">ДОХОДЫ vs РАСХОДЫ (6 месяцев)</span>
-        <div style="display:flex;gap:12px;margin-bottom:8px;font-size:12px"><span style="color:#4ade80">● Доходы</span><span style="color:#f87171">● Расходы</span></div>
-        <div style="position:relative">${BarChart(barI,'#4ade80')}<div style="position:absolute;top:0;left:0;right:0;opacity:0.7">${BarChart(barE,'#f87171')}</div></div>
+        <div style="display:flex;gap:16px;margin-bottom:10px;font-size:12px">
+          <span><span style="display:inline-block;width:10px;height:10px;background:#4ade80;border-radius:2px;margin-right:4px"></span>Доходы</span>
+          <span><span style="display:inline-block;width:10px;height:10px;background:#f87171;border-radius:2px;margin-right:4px"></span>Расходы</span>
+          <span style="color:#64748b;font-size:11px;margin-left:4px">баланс внизу</span>
+        </div>
+        ${GroupedBarChart(barI, barE)}
       </div>
       ${totalE>0?`<div class="card"><span class="lbl">СТРУКТУРА РАСХОДОВ</span>${PieChart(expPieData,totalE)}</div>`:''}
       ${totalI>0?`<div class="card"><span class="lbl">СТРУКТУРА ДОХОДОВ</span>${PieChart(incPieData,totalI)}</div>`:''}
