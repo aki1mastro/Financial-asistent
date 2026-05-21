@@ -137,6 +137,7 @@ let S = {
   expForm:{cat:'food',amt:'',note:'',date:''},
   sortBy:'date_desc', // date_desc | date_asc | amt_desc | amt_asc
   goal:{name:'',amount:0}, // savings goal
+  creditDebt:0, // total credit debt for payoff calculation
   incForm:{cat:'salary',amt:'',note:'',date:''},
   csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
   analysis:'', loading:false, syncing:false, hideBalance:false,
@@ -360,129 +361,169 @@ function doAnalysis(){
     const allIncKeys=Object.keys(S.incomes).sort();
     const allKeys=[...new Set([...allExpKeys,...allIncKeys])].sort();
     const L=[];
+    const pad=(s,n,r=false)=>{s=String(s);return r?s.padStart(n):s.padEnd(n);};
+    const line=(ch='─',n=38)=>ch.repeat(n);
 
-    // ── ШАПКА ──
-    L.push(`📊 ФИНАНСОВЫЙ АНАЛИЗ: ${MONTHS[S.month]} ${S.year}`);
-    L.push('');
-    L.push(`💵 Доходы:   ${fmt(totalI)} тг`);
-    L.push(`💸 Расходы:  ${fmt(totalE)} тг`);
-    const balSign = bal>=0?'+':'';
-    L.push(`${bal>=0?'✅':'❌'} Баланс:   ${balSign}${fmt(bal)} тг`);
-    if(totalI>0) L.push(`📊 Расходуешь ${Math.round(totalE/totalI*100)}% от дохода, остаток ${Math.round(Math.max(0,bal)/totalI*100)}%`);
+    // ── ШАПКА ──────────────────────────────────
+    L.push(`📊 ${MONTHS[S.month].toUpperCase()} ${S.year} — ФИНАНСОВЫЙ ОТЧЁТ`);
+    L.push(line());
+    L.push(`${pad('Доходы',18)} ${pad(fmt(totalI)+' тг',18,true)}`);
+    L.push(`${pad('Расходы',18)} ${pad(fmt(totalE)+' тг',18,true)}`);
+    L.push(line('─',36));
+    const balSign=bal>=0?'+':'';
+    L.push(`${pad('Баланс',18)} ${pad(balSign+fmt(bal)+' тг',18,true)} ${bal>=0?'✅':'❌'}`);
+    if(totalI>0){
+      L.push(`${pad('% расходов',18)} ${pad(Math.round(totalE/totalI*100)+'%',18,true)}`);
+      L.push(`${pad('% сбережений',18)} ${pad(Math.round(Math.max(0,bal)/totalI*100)+'%',18,true)}`);
+    }
     L.push('');
 
-    // ── СРАВНЕНИЕ С ПРОШЛЫМ МЕСЯЦЕМ ──
-    let prevM = S.month-1, prevY = S.year;
-    if(prevM < 0){prevM=11; prevY--;}
-    const prevKey = `${prevY}-${prevM}`;
-    const prevE = (S.expenses[prevKey]||[]).reduce((s,x)=>s+x.amt,0);
-    const prevI = (S.incomes[prevKey]||[]).reduce((s,x)=>s+x.amt,0);
-    if(prevE > 0 || prevI > 0){
-      L.push(`📅 СРАВНЕНИЕ С ${MONTHS[prevM].toUpperCase()}`);
-      const dE = totalE - prevE;
-      const dI = totalI - prevI;
-      if(prevE>0) L.push(`  Расходы: ${fmt(prevE)} → ${fmt(totalE)} тг (${dE>=0?'+':''}${fmt(dE)}, ${dE>=0?'▲':'▼'}${Math.abs(Math.round(dE/prevE*100))}%)`);
-      if(prevI>0) L.push(`  Доходы:  ${fmt(prevI)} → ${fmt(totalI)} тг (${dI>=0?'+':''}${fmt(dI)}, ${dI>=0?'▲':'▼'}${Math.abs(Math.round(dI/prevI*100))}%)`);
-      if(totalE > 0 && prevE > 0){
-        // Category changes
-        const prevTot = (S.expenses[prevKey]||[]).reduce((acc,x)=>{acc[x.cat]=(acc[x.cat]||0)+x.amt;return acc;},{});
-        const biggest = S.expCats.filter(c=>tot[c.id]||prevTot[c.id])
-          .map(c=>({...c, diff:(tot[c.id]||0)-(prevTot[c.id]||0)}))
-          .sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff)).slice(0,2);
-        biggest.forEach(c=>{
-          if(Math.abs(c.diff)>1000) L.push(`  ${c.e} ${c.n}: ${c.diff>=0?'+':''}${fmt(c.diff)} тг`);
+    // ── СРАВНЕНИЕ С ПРОШЛЫМ МЕСЯЦЕМ ────────────
+    let prevM=S.month-1, prevY=S.year;
+    if(prevM<0){prevM=11;prevY--;}
+    const prevKey=`${prevY}-${prevM}`;
+    const prevE=(S.expenses[prevKey]||[]).reduce((s,x)=>s+x.amt,0);
+    const prevI=(S.incomes[prevKey]||[]).reduce((s,x)=>s+x.amt,0);
+    const prevTot=(S.expenses[prevKey]||[]).reduce((acc,x)=>{acc[x.cat]=(acc[x.cat]||0)+x.amt;return acc;},{});
+
+    if(prevE>0||prevI>0){
+      L.push(`📅 СРАВНЕНИЕ: ${MONTHS[prevM].slice(0,3).toUpperCase()} → ${MONTHS[S.month].slice(0,3).toUpperCase()}`);
+      L.push(line());
+      L.push(`${pad('',12)}${pad(MONTHS[prevM].slice(0,3),10)}${pad(MONTHS[S.month].slice(0,3),10)}${pad('Δ',8,true)}`);
+      L.push(line('─',40));
+      if(prevI>0||totalI>0){
+        const dI=totalI-prevI; const sign=dI>=0?'+':'';
+        L.push(`${pad('Доходы',12)}${pad(fmt(prevI),10)}${pad(fmt(totalI),10)}${pad(sign+fmt(dI),8,true)}`);
+      }
+      const dE=totalE-prevE; const sE=dE>=0?'+':'';
+      L.push(`${pad('Расходы',12)}${pad(fmt(prevE),10)}${pad(fmt(totalE),10)}${pad(sE+fmt(dE),8,true)}`);
+
+      // Top changed categories
+      const changed=S.expCats.filter(c=>tot[c.id]||prevTot[c.id])
+        .map(c=>({...c,diff:(tot[c.id]||0)-(prevTot[c.id]||0)}))
+        .filter(c=>Math.abs(c.diff)>500)
+        .sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff)).slice(0,4);
+      if(changed.length){
+        L.push('');
+        L.push('Изменения по категориям:');
+        changed.forEach(c=>{
+          const s=c.diff>=0?'▲':'▼';
+          L.push(`  ${s} ${c.e} ${c.n}: ${c.diff>=0?'+':''}${fmt(c.diff)} тг`);
         });
       }
       L.push('');
     }
 
-    // ── НОРМА СБЕРЕЖЕНИЙ ──
-    if(totalI>0){
-      const sp=Math.round(Math.max(0,bal)/totalI*100);
-      L.push('💰 НОРМА СБЕРЕЖЕНИЙ');
-      if(sp>=20) L.push(`✅ ${sp}% — отлично! Продолжай в том же духе.`);
-      else if(sp>=10) L.push(`⚠️ ${sp}% — неплохо. Стремись к 20% (${fmt(Math.round(totalI*0.2))} тг).`);
-      else if(sp>0) L.push(`⚠️ Только ${sp}% — постарайся довести до 20% (${fmt(Math.round(totalI*0.2))} тг).`);
-      else L.push(`❌ Расходы превышают доходы на ${fmt(Math.abs(bal))} тг — срочная оптимизация!`);
-      L.push('');
-    }
-
-    // ── СТРУКТУРА РАСХОДОВ ──
+    // ── СТРУКТУРА РАСХОДОВ (ТАБЛИЦА) ────────────
     if(totalE>0){
-      L.push('🔍 СТРУКТУРА РАСХОДОВ');
+      L.push('💸 РАСХОДЫ ПО КАТЕГОРИЯМ');
+      L.push(line());
+      L.push(`${pad('Категория',20)}${pad('Сумма',10,true)}${pad('%',5,true)}`);
+      L.push(line('─',35));
       S.expCats.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).forEach(c=>{
         const pct=Math.round(tot[c.id]/totalE*100);
-        L.push(`${c.e} ${c.n}: ${fmt(tot[c.id])} тг (${pct}%)`);
+        const bar='█'.repeat(Math.round(pct/5));
+        L.push(`${pad(c.e+' '+c.n,20)}${pad(fmt(tot[c.id]),10,true)}${pad(pct+'%',5,true)}`);
       });
+      L.push(line('─',35));
+      L.push(`${pad('ИТОГО',20)}${pad(fmt(totalE),10,true)}${pad('100%',5,true)}`);
       L.push('');
     }
 
-    // ── КРЕДИТЫ — КОГДА ЗАКРОЮТСЯ ──
-    const creditAmt = tot.credit || 0;
-    if(creditAmt > 0){
+    // ── КРЕДИТЫ ─────────────────────────────────
+    const creditAmt=tot.credit||0;
+    if(creditAmt>0||S.creditDebt>0){
       L.push('💳 АНАЛИЗ КРЕДИТОВ');
-      L.push(`  Платишь ${fmt(creditAmt)} тг/мес по кредитам`);
-      if(totalI>0) L.push(`  Кредитная нагрузка: ${Math.round(creditAmt/totalI*100)}% от дохода ${Math.round(creditAmt/totalI*100)>30?'⚠️ выше нормы (30%)':'✅ в норме'}`);
-      // Average monthly credit from history
-      const months_with_credit = allExpKeys.filter(k=>(S.expenses[k]||[]).some(x=>x.cat==='credit'));
-      if(months_with_credit.length>=2){
-        const avgCredit = months_with_credit.reduce((s,k)=>{
-          return s+(S.expenses[k]||[]).filter(x=>x.cat==='credit').reduce((a,x)=>a+x.amt,0);
-        },0)/months_with_credit.length;
-        L.push(`  Средний платёж: ${fmt(avgCredit)} тг/мес за ${months_with_credit.length} мес.`);
+      L.push(line());
+      L.push(`${pad('Платёж/мес',22)} ${pad(fmt(creditAmt)+' тг',14,true)}`);
+      if(totalI>0) L.push(`${pad('% от дохода',22)} ${pad(Math.round(creditAmt/totalI*100)+'%',14,true)} ${creditAmt/totalI>0.3?'⚠️ > 30%':'✅ норма'}`);
+      if(S.creditDebt>0&&creditAmt>0){
+        const months=Math.ceil(S.creditDebt/creditAmt);
+        const payoffDate=new Date();payoffDate.setMonth(payoffDate.getMonth()+months);
+        L.push(`${pad('Общий долг',22)} ${pad(fmt(S.creditDebt)+' тг',14,true)}`);
+        L.push(`${pad('Закроется через',22)} ${pad(months+' мес.',14,true)}`);
+        L.push(`${pad('Дата погашения',22)} ${pad(MONTHS[payoffDate.getMonth()]+' '+payoffDate.getFullYear(),14,true)} 🏁`);
+        if(bal>creditAmt){
+          const extra=Math.round(bal*0.3);
+          const monthsFaster=Math.ceil(S.creditDebt/(creditAmt+extra));
+          L.push(`${pad('Доплачивая +'+fmt(extra),22)} ${pad('закроешь за '+monthsFaster+' мес.',14,true)}`);
+        }
+      } else if(S.creditDebt===0) {
+        L.push('  💡 Укажи общий долг выше — посчитаю дату погашения');
       }
       L.push('');
     }
 
-    // ── СОВЕТЫ ──
-    L.push('💡 РЕКОМЕНДАЦИИ');
-    let n=1;
-    if(bal<0) L.push(`${n++}. Расходы выше доходов на ${fmt(Math.abs(bal))} тг — найди что сократить.`);
-    if(totalI>0&&Math.max(0,bal)/totalI<0.1&&bal>=0) L.push(`${n++}. Откладывай хотя бы ${fmt(Math.round(totalI*0.1))} тг/мес (10% от дохода).`);
-    if(tot.cafe&&totalE>0&&tot.cafe/totalE>0.1) L.push(`${n++}. Кафе/рестораны ${Math.round(tot.cafe/totalE*100)}% — готовка дома сэкономит ~${fmt(Math.round(tot.cafe*0.4))} тг.`);
-    if(tot.credit&&totalI>0&&tot.credit/totalI>0.3) L.push(`${n++}. Кредитная нагрузка высокая. Попробуй рефинансировать или погасить досрочно.`);
-    if(totalI>0) L.push(`${n++}. Правило 50/30/20: нужды ${fmt(Math.round(totalI*0.5))} / желания ${fmt(Math.round(totalI*0.3))} / сбережения ${fmt(Math.round(totalI*0.2))} тг.`);
-    L.push('');
+    // ── НОРМА СБЕРЕЖЕНИЙ ────────────────────────
+    if(totalI>0){
+      const sp=Math.max(0,bal);
+      const spPct=Math.round(sp/totalI*100);
+      L.push('💰 НОРМА СБЕРЕЖЕНИЙ (правило 50/30/20)');
+      L.push(line());
+      L.push(`${pad('Статья',18)}${pad('Норма',8,true)}${pad('Факт',10,true)}${pad('Цель',10,true)}`);
+      L.push(line('─',46));
+      L.push(`${pad('Нужды (50%)',18)}${pad('50%',8,true)}${pad(totalI>0?Math.round(totalE/totalI*100)+'%':'—',10,true)}${pad(fmt(Math.round(totalI*0.5)),10,true)}`);
+      L.push(`${pad('Желания (30%)',18)}${pad('30%',8,true)}${pad('—',10,true)}${pad(fmt(Math.round(totalI*0.3)),10,true)}`);
+      L.push(`${pad('Сбережения (20%)',18)}${pad('20%',8,true)}${pad(spPct+'%',10,true)}${pad(fmt(Math.round(totalI*0.2)),10,true)}`);
+      L.push('');
+      if(spPct>=20) L.push('✅ Отлично — норма сбережений выполнена!');
+      else L.push(`⚠️ Сейчас ${fmt(sp)} тг — нужно ${fmt(Math.round(totalI*0.2))} тг (${Math.round(totalI*0.2)-sp>0?'+'+fmt(Math.round(totalI*0.2)-sp)+' тг':''})`);
+      L.push('');
+    }
 
-    // ── ЦЕЛЬ НАКОПЛЕНИЯ ──
+    // ── ЦЕЛЬ НАКОПЛЕНИЯ ─────────────────────────
     if(S.goal.amount>0&&S.goal.name){
-      L.push(`🎯 ЦЕЛЬ: ${S.goal.name}`);
-      const target=S.goal.amount;
       const monthlySave=Math.max(0,bal);
+      L.push(`🎯 ЦЕЛЬ: ${S.goal.name.toUpperCase()}`);
+      L.push(line());
+      L.push(`${pad('Нужно накопить',24)} ${pad(fmt(S.goal.amount)+' тг',12,true)}`);
+      L.push(`${pad('Откладываешь сейчас',24)} ${pad(fmt(monthlySave)+' тг/мес',12,true)}`);
       if(monthlySave>0){
-        const months=Math.ceil(target/monthlySave);
-        const date=new Date();date.setMonth(date.getMonth()+months);
-        L.push(`  Нужно: ${fmt(target)} тг`);
-        L.push(`  Откладываешь сейчас: ${fmt(monthlySave)} тг/мес`);
-        L.push(`  Накопишь за: ${months} мес. (примерно ${MONTHS[date.getMonth()]} ${date.getFullYear()})`);
-        const faster=Math.round(totalE*0.1);
-        L.push(`  Сократив расходы на 10% (${fmt(faster)} тг/мес) → за ${Math.ceil(target/(monthlySave+faster))} мес.`);
+        const months=Math.ceil(S.goal.amount/monthlySave);
+        const d=new Date();d.setMonth(d.getMonth()+months);
+        L.push(`${pad('Накопишь за',24)} ${pad(months+' мес.',12,true)}`);
+        L.push(`${pad('Примерно к',24)} ${pad(MONTHS[d.getMonth()]+' '+d.getFullYear(),12,true)} 🏁`);
+        L.push('');
+        L.push('Сценарии ускорения:');
+        [10,20,30].forEach(pct=>{
+          const extra=Math.round(totalE*(pct/100));
+          const m=Math.ceil(S.goal.amount/(monthlySave+extra));
+          L.push(`  −${pct}% расходов (+${fmt(extra)} тг/мес) → за ${m} мес.`);
+        });
       } else {
-        L.push(`  Сначала выйди в плюс по балансу — сейчас копить не получится.`);
+        L.push('  ❌ Сначала выйди в плюс по балансу');
       }
       L.push('');
     }
 
-    // ── ТРЕНД ──
+    // ── ТРЕНД ───────────────────────────────────
     if(allKeys.length>=2){
-      L.push('📈 ТРЕНД ПО МЕСЯЦАМ');
+      L.push('📈 ТРЕНД (последние 6 месяцев)');
+      L.push(line());
+      L.push(`${pad('Месяц',8)}${pad('Доход',10,true)}${pad('Расход',10,true)}${pad('Баланс',10,true)}`);
+      L.push(line('─',38));
       allKeys.slice(-6).forEach(k=>{
         const[y,m]=k.split('-');
         const e=(S.expenses[k]||[]).reduce((s,x)=>s+x.amt,0);
         const i=(S.incomes[k]||[]).reduce((s,x)=>s+x.amt,0);
         const b=i-e;
-        L.push(`${MONTHS[+m].slice(0,3)} ${y}: ↑${fmt(i)} ↓${fmt(e)} ${b>=0?'=+':'='}${fmt(b)} тг`);
+        const bSign=b>=0?'+':'';
+        L.push(`${pad(MONTHS[+m].slice(0,3),8)}${pad(i>=1000?Math.round(i/1000)+'k':'—',10,true)}${pad(e>=1000?Math.round(e/1000)+'k':'—',10,true)}${pad(bSign+(Math.abs(b)>=1000?Math.round(b/1000)+'k':b),10,true)}`);
       });
       L.push('');
     }
 
-    // ── ПЛАН НА СЛЕД МЕСЯЦ ──
-    L.push('🗓 ПЛАН НА СЛЕДУЮЩИЙ МЕСЯЦ');
-    const avgE=allExpKeys.length?Math.round(allExpKeys.reduce((s,k)=>s+(S.expenses[k]||[]).reduce((a,x)=>a+x.amt,0),0)/allExpKeys.length):totalE;
-    const avgI=allIncKeys.length?Math.round(allIncKeys.reduce((s,k)=>s+(S.incomes[k]||[]).reduce((a,x)=>a+x.amt,0),0)/allIncKeys.length):totalI;
-    L.push(`  Целевые доходы:   ${fmt(avgI)} тг`);
-    L.push(`  Целевые расходы:  ${fmt(Math.round(avgE*0.9))} тг (−10%)`);
-    L.push(`  Цель сбережений:  ${fmt(Math.round(avgI*0.2))} тг (20%)`);
+    // ── РЕКОМЕНДАЦИИ ────────────────────────────
+    L.push('💡 РЕКОМЕНДАЦИИ');
+    L.push(line());
+    let n=1;
+    if(bal<0) L.push(`${n++}. ❌ Расходы выше доходов на ${fmt(Math.abs(bal))} тг — срочная оптимизация!`);
+    if(totalI>0&&Math.max(0,bal)/totalI<0.1&&bal>=0) L.push(`${n++}. Откладывай минимум ${fmt(Math.round(totalI*0.1))} тг/мес (10% от дохода).`);
+    if(tot.credit&&totalI>0&&tot.credit/totalI>0.3) L.push(`${n++}. Кредитная нагрузка ${Math.round(tot.credit/totalI*100)}% — рассмотри рефинансирование.`);
+    if(tot.cafe&&totalE>0&&tot.cafe/totalE>0.1) L.push(`${n++}. Кафе ${Math.round(tot.cafe/totalE*100)}% расходов — готовка дома сэкономит ~${fmt(Math.round(tot.cafe*0.4))} тг.`);
+    if(totalI>0) L.push(`${n++}. Цель: ${fmt(Math.round(totalI*0.2))} тг/мес в сбережения (20% от дохода).`);
+    const sortedCats=S.expCats.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]);
+    if(sortedCats[0]&&totalE>0) L.push(`${n++}. Топ расход: ${sortedCats[0].e} ${sortedCats[0].n} (${fmt(tot[sortedCats[0].id])} тг). −10% = экономия ${fmt(Math.round(tot[sortedCats[0].id]*0.1))} тг.`);
 
     setState({analysis:L.join('\n'),loading:false});
   },400);
@@ -710,10 +751,11 @@ function render(){
           <select class="inp" id="iCat">${S.incCats.map(c=>`<option value="${c.id}"${c.id===S.incForm.cat?' selected':''}>${c.e} ${c.n}</option>`).join('')}</select>
           <input class="inp" type="number" inputmode="decimal" placeholder="Сумма (тг)" id="iAmt" value="${S.incForm.amt}"/>
         </div>
-        <div style="display:grid;grid-template-columns:1fr auto;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:10px">
           <input class="inp" placeholder="Заметка" id="iNote" value="${S.incForm.note}"/>
           <button class="btn" id="addIncBtn" style="background:#4ade80;color:#0f1117">+ Добавить</button>
         </div>
+        <input class="inp" type="datetime-local" id="iDate" value="${S.incForm.date||nowLocal()}" style="font-size:13px;color:#94a3b8"/>
       </div>
       ${totalI>0?`<div class="card" style="margin-bottom:14px;border-color:#4ade8030"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span class="lbl" style="margin:0">ИТОГО ДОХОДОВ</span><span style="font-size:20px;font-weight:700;color:#4ade80">${fmt(totalI)} тг</span></div><div class="grid2">${S.incCats.filter(c=>incBycat[c.id]).map(c=>`<div class="catcard" style="border-left:3px solid ${c.c}"><span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span><div style="text-align:right"><div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(incBycat[c.id])} тг</div><div style="font-size:10px;color:#475569">${Math.round(incBycat[c.id]/totalI*100)}%</div></div></div>`).join('')}</div></div>`:''}
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -794,16 +836,19 @@ function render(){
 
     ${S.tab==='analysis'?`
       <div class="card" style="margin-bottom:14px">
-        <span class="lbl">🎯 ЦЕЛЬ НАКОПЛЕНИЯ (необязательно)</span>
-        <div class="grid2" style="gap:10px">
-          <input class="inp" id="goalName" placeholder="Что копишь? (авто, путешествие...)" value="${S.goal.name}"/>
-          <input class="inp" type="number" inputmode="decimal" id="goalAmt" placeholder="Сумма (тг)" value="${S.goal.amount||''}"/>
+        <span class="lbl">🎯 ЦЕЛЬ НАКОПЛЕНИЯ</span>
+        <div class="grid2" style="gap:10px;margin-bottom:10px">
+          <input class="inp" id="goalName" placeholder="Авто, путешествие, квартира..." value="${S.goal.name}"/>
+          <input class="inp" type="number" inputmode="decimal" id="goalAmt" placeholder="Сумма цели (тг)" value="${S.goal.amount||''}"/>
         </div>
+        <span class="lbl" style="margin-top:4px">💳 ОБЩИЙ ДОЛГ ПО КРЕДИТАМ</span>
+        <input class="inp" type="number" inputmode="decimal" id="creditDebtInp" placeholder="Введи общую сумму долга (тг)" value="${S.creditDebt||''}"/>
+        <div style="font-size:11px;color:#475569;margin-top:6px">Укажи сумму — посчитаю когда закроешь кредиты</div>
       </div>
       <button class="btn" id="analyzeBtn" style="width:100%;background:${S.loading?'#1e2a3a':'linear-gradient(135deg,#f59e0b,#fbbf24)'};color:${S.loading?'#64748b':'#0f1117'};border:none;border-radius:10px;padding:16px;font-size:15px;font-weight:700;cursor:${S.loading?'not-allowed':'pointer'};margin-bottom:16px">${S.loading?'⏳ Анализирую...':'🤖 Полный финансовый анализ'}</button>
       ${!S.analysis&&!S.loading?'<div class="empty">Нажми кнопку — получишь полный анализ<br>доходов, расходов и советы по накоплению</div>':''}
       ${S.loading?'<div class="empty">⚙️ Считаю данные...</div>':''}
-      ${S.analysis?`<div class="card" style="line-height:1.8">${S.analysis.split('\n').map(line=>{const bold=line.startsWith('📊')||line.startsWith('💰')||line.startsWith('🔍')||line.startsWith('⚡')||line.startsWith('💡')||line.startsWith('📈')||line.startsWith('🎯');return`<p style="margin:0 0 6px 0;font-weight:${bold?700:400};color:${bold?'#f1f5f9':'#94a3b8'};font-size:${bold?15:13}px">${line||'&nbsp;'}</p>`;}).join('')}</div>`:''}
+      ${S.analysis?`<div class="card" style="line-height:1.7;font-family:monospace;font-size:13px">${S.analysis.split('\n').map(line=>{const bold=line.startsWith('📊')||line.startsWith('💰')||line.startsWith('🔍')||line.startsWith('⚡')||line.startsWith('💡')||line.startsWith('📈')||line.startsWith('🎯');return`<p style="margin:0 0 6px 0;font-weight:${bold?700:400};color:${bold?'#f1f5f9':'#94a3b8'};font-size:${bold?15:13}px">${line||'&nbsp;'}</p>`;}).join('')}</div>`:''}
     `:''}
 
     ${S.tab==='settings'?renderSettings():''}
@@ -845,7 +890,8 @@ function render(){
     if(S.loading) return;
     const gn=document.getElementById('goalName')?.value||'';
     const ga=Number(document.getElementById('goalAmt')?.value||0);
-    setState({goal:{name:gn,amount:ga}});
+    const cd=Number(document.getElementById('creditDebtInp')?.value||0);
+    setState({goal:{name:gn,amount:ga},creditDebt:cd});
     setTimeout(doAnalysis,0);
   };
 
