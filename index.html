@@ -532,36 +532,32 @@ function doAnalysis(){
 
 async function doReceiptScan(){
   if(!S.receipt.imageData) return;
+  const apiKey=localStorage.getItem('gemini_api_key')||'';
+  if(!apiKey){
+    setState({receipt:{...S.receipt,step:'idle',error:'Укажи Google Gemini API ключ в настройках (⚙️)'}});
+    return;
+  }
   setState({receipt:{...S.receipt,loading:true,step:'scanning',error:''}});
   try{
     const catList=S.expCats.map(c=>`${c.id}(${c.n})`).join(', ');
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
+    const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:1000,
-        messages:[{
-          role:'user',
-          content:[
-            {type:'image',source:{type:'base64',media_type:S.receipt.mimeType,data:S.receipt.imageData}},
-            {type:'text',text:`Ты — анализатор кассовых чеков. Извлеки расходы из этого чека.
+        contents:[{parts:[
+          {inline_data:{mime_type:S.receipt.mimeType,data:S.receipt.imageData}},
+          {text:`Ты — анализатор кассовых чеков. Извлеки расходы из этого чека.
 Доступные категории: ${catList}
 Верни ТОЛЬКО JSON массив (без пояснений, без markdown):
 [{"cat":"ID_категории","amt":число_в_тенге,"note":"описание на русском"}]
-Правила:
-- amt — число (только цифры, без валюты)
-- Группируй похожие товары в одну строку
-- Если чек на один магазин — одна запись с итогом
-- Выбирай наиболее подходящую категорию из списка
-- note — коротко (до 50 символов)`}
-          ]
-        }]
+Правила: amt — число без валюты, группируй похожие товары, note до 50 символов на русском.`}
+        ]}],
+        generationConfig:{temperature:0.1,maxOutputTokens:1000}
       })
     });
     const data=await res.json();
     if(data.error) throw new Error(data.error.message);
-    const text=(data.content||[]).map(i=>i.text||'').join('');
+    const text=data.candidates?.[0]?.content?.parts?.[0]?.text||'';
     const clean=text.replace(/```json|```/g,'').trim();
     const parsed=JSON.parse(clean);
     const results=parsed.map((r,i)=>({...r,_id:i,selected:true,amt:Number(r.amt)||0}));
@@ -635,9 +631,24 @@ function renderSettings(){
   const nc=S.settings.newCat;
   const ec=S.settings.editCat;
   const editId=S.settings.editId;
+  const savedKey=localStorage.getItem('gemini_api_key')||'';
+  const keyMasked=savedKey?savedKey.slice(0,8)+'••••••••••••••••••••':'';
 
   return`
-  <!-- Type Toggle -->
+  <!-- API Key -->
+  <div class="card" style="margin-bottom:16px;border-color:#1e3a5f">
+    <span class="lbl">🔑 GOOGLE GEMINI API КЛЮЧ (для сканирования чеков)</span>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <input class="inp" id="apiKeyInp" type="password" placeholder="AIzaSy..." value="${savedKey}" style="flex:1;font-size:13px"/>
+      <button class="btn" id="saveApiKeyBtn" style="padding:10px 14px;white-space:nowrap">💾 Сохранить</button>
+    </div>
+    ${savedKey
+      ?`<div style="font-size:11px;color:#4ade80">✅ Ключ сохранён: ${keyMasked}</div>`
+      :`<div style="font-size:11px;color:#64748b;line-height:1.8">
+          🆓 Бесплатно — 1500 запросов/день<br>
+          Получи ключ: <b style="color:#60a5fa">aistudio.google.com</b> → Get API Key
+        </div>`}
+  </div>
   <div style="display:flex;gap:8px;margin-bottom:12px">
     <button class="${type==='expense'?'btn':'btn2'}" style="flex:1" data-set-type="expense">💸 Расходы</button>
     <button class="${type==='income'?'btn':'btn2'}" style="flex:1;${type==='income'?'background:#4ade80;color:#0f1117':''}" data-set-type="income">💵 Доходы</button>
@@ -1107,6 +1118,12 @@ function render(){
   document.querySelectorAll('.edit-cat-sel').forEach(sel=>sel.onchange=e=>{e.stopPropagation();setState({editEntry:{...S.editEntry,cat:e.target.value}});});
 
   // SETTINGS EVENTS
+  const saveApiKeyBtn=document.getElementById('saveApiKeyBtn');
+  if(saveApiKeyBtn)saveApiKeyBtn.onclick=()=>{
+    const k=document.getElementById('apiKeyInp')?.value?.trim()||'';
+    if(k){localStorage.setItem('gemini_api_key',k);render();}
+    else{localStorage.removeItem('gemini_api_key');render();}
+  };
   document.querySelectorAll('[data-set-type]').forEach(b=>b.onclick=()=>setState({settings:{...S.settings,activeType:b.dataset.setType,editId:null,editCat:null,newCat:{...S.settings.newCat,type:b.dataset.setType}}}));
   const resetCatsBtn=document.getElementById('resetCatsBtn');
   if(resetCatsBtn) resetCatsBtn.onclick=()=>resetCategoriesToDefault(S.settings.activeType);
