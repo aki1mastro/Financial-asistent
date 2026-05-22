@@ -140,6 +140,7 @@ let S = {
   creditDebt:0, // total credit debt for payoff calculation
   incForm:{cat:'salary',amt:'',note:'',date:''},
   csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
+  receipt:{step:'idle',imageData:null,mimeType:'image/jpeg',results:[],loading:false,error:''},
   analysis:'', loading:false, syncing:false, hideBalance:false,
   editEntry:null, // {fid, type, cat, amt, note}
   ghostCats:{}, // deleted categories kept for display
@@ -529,6 +530,62 @@ function doAnalysis(){
   },400);
 }
 
+async function doReceiptScan(){
+  if(!S.receipt.imageData) return;
+  setState({receipt:{...S.receipt,loading:true,step:'scanning',error:''}});
+  try{
+    const catList=S.expCats.map(c=>`${c.id}(${c.n})`).join(', ');
+    const res=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:1000,
+        messages:[{
+          role:'user',
+          content:[
+            {type:'image',source:{type:'base64',media_type:S.receipt.mimeType,data:S.receipt.imageData}},
+            {type:'text',text:`Ты — анализатор кассовых чеков. Извлеки расходы из этого чека.
+Доступные категории: ${catList}
+Верни ТОЛЬКО JSON массив (без пояснений, без markdown):
+[{"cat":"ID_категории","amt":число_в_тенге,"note":"описание на русском"}]
+Правила:
+- amt — число (только цифры, без валюты)
+- Группируй похожие товары в одну строку
+- Если чек на один магазин — одна запись с итогом
+- Выбирай наиболее подходящую категорию из списка
+- note — коротко (до 50 символов)`}
+          ]
+        }]
+      })
+    });
+    const data=await res.json();
+    if(data.error) throw new Error(data.error.message);
+    const text=(data.content||[]).map(i=>i.text||'').join('');
+    const clean=text.replace(/```json|```/g,'').trim();
+    const parsed=JSON.parse(clean);
+    const results=parsed.map((r,i)=>({...r,_id:i,selected:true,amt:Number(r.amt)||0}));
+    setState({receipt:{...S.receipt,loading:false,step:'preview',results,error:''}});
+  }catch(e){
+    setState({receipt:{...S.receipt,loading:false,step:'idle',error:'Ошибка: '+e.message}});
+  }
+}
+
+async function importReceipt(){
+  const items=S.receipt.results.filter(r=>r.selected&&r.amt>0);
+  if(!items.length) return;
+  setState({syncing:true});
+  const now=new Date();
+  const entryMk=`${now.getFullYear()}-${now.getMonth()}`;
+  for(const r of items){
+    const entry={cat:r.cat,amt:r.amt,note:r.note,date:now.toISOString(),monthKey:entryMk};
+    const ref=await addDoc(collection(db,'expenses'),entry);entry.fid=ref.id;
+    S.expenses={...S.expenses,[entryMk]:[...(S.expenses[entryMk]||[]),entry]};
+  }
+  setState({syncing:false,receipt:{step:'done',imageData:null,mimeType:'image/jpeg',results:[],loading:false,error:''}});
+  setTimeout(()=>setState({receipt:{step:'idle',imageData:null,mimeType:'image/jpeg',results:[],loading:false,error:''},tab:'expenses'}),2000);
+}
+
 function PieChart(data,total){
   if(!total)return'<div class="empty">Нет данных</div>';
   const cats=data.sort((a,b)=>b.v-a.v);let angle=-Math.PI/2;const r=65,cx=85,cy=85;let paths='';
@@ -678,7 +735,7 @@ function render(){
       <div class="months" style="border:none;flex:1;overflow-x:auto">${MONTHS.map((m,i)=>{const isA=i===S.month;const has=!!(S.expenses[`${S.year}-${i}`]?.length||S.incomes[`${S.year}-${i}`]?.length);return`<button class="mon${isA?' active':has?' has':''}" data-m="${i}">${m.slice(0,3)}${has&&!isA?' •':''}</button>`;}).join('')}</div>
     </div>
     <div class="tabs">
-      ${[['expenses','💸 Расходы'],['incomes','💵 Доходы'],['charts','📊 График'],['csv','📥 CSV'],['analysis','🤖 Анализ'],['settings','⚙️']].map(([t,l])=>`<button class="tab${S.tab===t?' active':''}" data-tab="${t}">${l}</button>`).join('')}
+      ${[['expenses','💸 Расходы'],['incomes','💵 Доходы'],['charts','📊 График'],['csv','📥 CSV'],['receipt','📷 Чек'],['analysis','🤖 Анализ'],['settings','⚙️']].map(([t,l])=>`<button class="tab${S.tab===t?' active':''}" data-tab="${t}">${l}</button>`).join('')}
     </div>
     <div class="content-wrap">
 
@@ -834,6 +891,89 @@ function render(){
       ${S.csv.step==='done'?`<div class="card" style="text-align:center;padding:40px"><div style="font-size:48px;margin-bottom:12px">✅</div><div style="font-size:16px;color:#4ade80;font-weight:700">Сохранено в Firebase!</div></div>`:''}
     `:''}
 
+    ${S.tab==='receipt'?`
+      ${S.receipt.step==='idle'||S.receipt.step==='scanning'?`
+        <div style="text-align:center;padding:24px 0 16px">
+          <div style="font-size:48px;margin-bottom:8px">📷</div>
+          <div style="font-size:16px;font-weight:700;color:#f1f5f9;margin-bottom:6px">Сканировать чек</div>
+          <div style="font-size:13px;color:#64748b;margin-bottom:20px">Сфотографируй или загрузи фото кассового чека — Claude распознает расходы автоматически</div>
+        </div>
+        <input type="file" id="receiptFileInp" accept="image/*" capture="environment" style="display:none"/>
+        ${S.receipt.error?`<div style="background:#2a1515;border:1px solid #f87171;border-radius:8px;padding:10px 14px;color:#f87171;font-size:13px;margin-bottom:14px">⚠️ ${S.receipt.error}</div>`:''}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+          <button class="btn" id="cameraBtn" style="padding:16px;font-size:13px;display:flex;flex-direction:column;align-items:center;gap:6px">
+            <span style="font-size:24px">📸</span> Камера
+          </button>
+          <button class="btn2" id="galleryBtn" style="padding:16px;font-size:13px;display:flex;flex-direction:column;align-items:center;gap:6px">
+            <span style="font-size:24px">🖼</span> Галерея
+          </button>
+        </div>
+        <div class="card" style="border-style:dashed;border-color:#1e3a5f;background:#13161f">
+          <span class="lbl">КАК ИСПОЛЬЗОВАТЬ</span>
+          <div style="font-size:13px;color:#64748b;line-height:2">
+            1️⃣ Нажми «Камера» или «Галерея»<br>
+            2️⃣ Выбери фото чека<br>
+            3️⃣ Claude определит категории и суммы<br>
+            4️⃣ Проверь и сохрани в Firebase
+          </div>
+        </div>
+        ${S.receipt.step==='scanning'?`
+          <div style="text-align:center;padding:30px;background:#1a1f2e;border-radius:12px;border:1px solid #1e2a3a;margin-top:14px">
+            <div style="font-size:36px;margin-bottom:12px;animation:spin 1s linear infinite">⚙️</div>
+            <div style="color:#fbbf24;font-weight:700;font-size:15px">Claude анализирует чек...</div>
+            <div style="color:#64748b;font-size:13px;margin-top:6px">Это займёт несколько секунд</div>
+          </div>
+          <style>@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}</style>
+        `:''}
+      `:''}
+
+      ${S.receipt.step==='preview'?`
+        <div class="card" style="margin-bottom:14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <span class="lbl" style="margin:0">НАЙДЕНО РАСХОДОВ</span>
+            <span style="background:#0f2a1a;color:#4ade80;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700">${S.receipt.results.filter(r=>r.selected).length} выбрано</span>
+          </div>
+          ${S.receipt.results.map((r,i)=>{
+            const c=getExpCat(r.cat);
+            return`<div style="background:#0f1117;border:1px solid ${r.selected?c.c+'40':'#1e2a3a'};border-radius:10px;padding:12px;margin-bottom:10px;transition:border-color .2s">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                <input type="checkbox" class="receipt-chk" data-idx="${i}" ${r.selected?'checked':''} style="width:18px;height:18px;accent-color:#fbbf24;flex-shrink:0;cursor:pointer"/>
+                <select class="inp receipt-cat" data-idx="${i}" style="flex:1;font-size:13px;opacity:${r.selected?1:0.4}">
+                  ${S.expCats.map(cat=>`<option value="${cat.id}"${cat.id===r.cat?' selected':''}>${cat.e} ${cat.n}</option>`).join('')}
+                </select>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;opacity:${r.selected?1:0.4}">
+                <div>
+                  <div style="font-size:10px;color:#64748b;margin-bottom:4px">СУММА (тг)</div>
+                  <input class="inp receipt-amt" data-idx="${i}" type="number" inputmode="decimal" value="${r.amt}" style="font-weight:700;font-size:15px;color:#fbbf24"/>
+                </div>
+                <div>
+                  <div style="font-size:10px;color:#64748b;margin-bottom:4px">ОПИСАНИЕ</div>
+                  <input class="inp receipt-note" data-idx="${i}" value="${r.note||''}" placeholder="Заметка" style="font-size:13px"/>
+                </div>
+              </div>
+            </div>`;
+          }).join('')}
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0 4px;border-top:1px solid #1e2a3a">
+            <span style="color:#94a3b8;font-size:13px">Итого:</span>
+            <span style="font-size:18px;font-weight:700;color:#fbbf24">${fmt(S.receipt.results.filter(r=>r.selected).reduce((s,r)=>s+r.amt,0))} тг</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn2" id="receiptBack" style="flex:1">← Новый чек</button>
+          <button class="btn" id="receiptImportBtn" style="flex:2;background:linear-gradient(135deg,#f59e0b,#fbbf24)">✅ Сохранить в Firebase</button>
+        </div>
+      `:''}
+
+      ${S.receipt.step==='done'?`
+        <div class="card" style="text-align:center;padding:40px">
+          <div style="font-size:48px;margin-bottom:12px">✅</div>
+          <div style="font-size:16px;color:#4ade80;font-weight:700">Расходы сохранены!</div>
+          <div style="font-size:13px;color:#64748b;margin-top:8px">Переход к расходам...</div>
+        </div>
+      `:''}
+    `:''}
+
     ${S.tab==='analysis'?`
       <div class="card" style="margin-bottom:14px">
         <span class="lbl">🎯 ЦЕЛЬ НАКОПЛЕНИЯ</span>
@@ -902,6 +1042,51 @@ function render(){
   const csvBack=document.getElementById('csvBack');if(csvBack)csvBack.onclick=()=>setState({csv:{...S.csv,step:S.csv.headers.length?'mapping':'idle'}});
   const csvPreviewBtn=document.getElementById('csvPreviewBtn');if(csvPreviewBtn)csvPreviewBtn.onclick=()=>{if(S.csv.map.amt)buildPreview();};
   const csvImportBtn=document.getElementById('csvImportBtn');if(csvImportBtn)csvImportBtn.onclick=importCSV;
+
+  // RECEIPT EVENTS
+  const receiptFileInp=document.getElementById('receiptFileInp');
+  function handleReceiptFile(file){
+    if(!file||!file.type.startsWith('image/')) return;
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const dataUrl=e.target.result;
+      const base64=dataUrl.split(',')[1];
+      setState({receipt:{...S.receipt,imageData:base64,mimeType:file.type,step:'scanning',error:''}});
+      setTimeout(doReceiptScan,0);
+    };
+    reader.readAsDataURL(file);
+  }
+  const cameraBtn=document.getElementById('cameraBtn');
+  const galleryBtn=document.getElementById('galleryBtn');
+  if(cameraBtn&&receiptFileInp){
+    cameraBtn.onclick=()=>{receiptFileInp.setAttribute('capture','environment');receiptFileInp.click();};
+    galleryBtn.onclick=()=>{receiptFileInp.removeAttribute('capture');receiptFileInp.click();};
+    receiptFileInp.onchange=e=>handleReceiptFile(e.target.files[0]);
+  }
+  const receiptBack=document.getElementById('receiptBack');
+  if(receiptBack)receiptBack.onclick=()=>setState({receipt:{step:'idle',imageData:null,mimeType:'image/jpeg',results:[],loading:false,error:''}});
+  const receiptImportBtn=document.getElementById('receiptImportBtn');
+  if(receiptImportBtn)receiptImportBtn.onclick=importReceipt;
+  document.querySelectorAll('.receipt-chk').forEach(chk=>chk.onchange=e=>{
+    const idx=+chk.dataset.idx;
+    S.receipt.results[idx].selected=chk.checked;
+    setState({receipt:{...S.receipt}});
+  });
+  document.querySelectorAll('.receipt-cat').forEach(sel=>sel.onchange=e=>{
+    const idx=+sel.dataset.idx;
+    S.receipt.results[idx].cat=sel.value;
+    setState({receipt:{...S.receipt}});
+  });
+  document.querySelectorAll('.receipt-amt').forEach(inp=>inp.oninput=e=>{
+    const idx=+inp.dataset.idx;
+    S.receipt.results[idx].amt=Number(e.target.value)||0;
+    // Update total display without full re-render
+    const totEl=inp.closest('.card')?.querySelector('[data-receipt-total]');
+  });
+  document.querySelectorAll('.receipt-note').forEach(inp=>inp.oninput=e=>{
+    const idx=+inp.dataset.idx;
+    S.receipt.results[idx].note=e.target.value;
+  });
 
   // ENTRY EDIT EVENTS
   document.querySelectorAll('.entry-tap').forEach(el=>{
