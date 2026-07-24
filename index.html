@@ -102,6 +102,28 @@ function guessCat(cat, note, cats) {
   for (const c of cats) { if ((c.k||[]).some(k=>t.includes(k))) return c.id; }
   return cats[cats.length-1]?.id || 'other';
 }
+function parseAmountToken(raw){
+  let s=raw.replace(/\s+/g,'');
+  const commaCount=(s.match(/,/g)||[]).length;
+  const dotCount=(s.match(/\./g)||[]).length;
+  if(commaCount===1&&dotCount===0) s=s.replace(',','.');
+  else s=s.replace(/,/g,'');
+  return parseFloat(s);
+}
+function parseQuickAdd(raw){
+  let text=(raw||'').trim();
+  if(!text) return null;
+  const isIncome=text.startsWith('+');
+  if(isIncome) text=text.slice(1).trim();
+  const m=text.match(/\d[\d\s]*(?:[.,]\d+)?/);
+  if(!m) return null;
+  const amt=parseAmountToken(m[0]);
+  if(!amt||amt<=0) return null;
+  const note=(text.slice(0,m.index)+' '+text.slice(m.index+m[0].length)).replace(/\s+/g,' ').trim();
+  const cats=isIncome?S.incCats:S.expCats;
+  const cat=guessCat('',note,cats);
+  return {isIncome,amt,note,cat};
+}
 function parseDate(s) {
   if (!s) return new Date(); s=s.trim();
   let m;
@@ -150,6 +172,7 @@ let S = {
   exchangeRates: JSON.parse(localStorage.getItem('findir_rates')||'{"USD":540,"EUR":590,"RUB":6.5,"KGS":6.2}'),
   search:'',
   catFilter:null, // expense category id to filter records list by
+  quickAddFlash:null,
   csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
   analysis:'', loading:false, syncing:false, hideBalance:false,
   editEntry:null, // {fid, type, cat, amt, note, walletId}
@@ -401,6 +424,38 @@ async function addIncome(){
   setState({incForm:{...S.incForm,amt:'',note:''},syncing:false});
 }
 async function delExpense(fid){setState({syncing:true});await deleteDoc(doc(db,'expenses',fid));S.expenses={...S.expenses,[mk()]:S.expenses[mk()].filter(e=>e.fid!==fid)};setState({syncing:false});}
+async function quickAdd(){
+  const inp=document.getElementById('quickAddInp');
+  if(!inp) return;
+  const parsed=parseQuickAdd(inp.value);
+  if(!parsed){
+    inp.style.borderColor='#f87171';
+    setTimeout(()=>{if(inp)inp.style.borderColor='';},600);
+    return;
+  }
+  setState({syncing:true});
+  const entryDate=new Date();
+  const entryMk=`${entryDate.getFullYear()}-${entryDate.getMonth()}`;
+  const cObj=parsed.isIncome?getIncCat(parsed.cat):getExpCat(parsed.cat);
+  if(parsed.isIncome){
+    const wallet=S.incForm.wallet||'cash';
+    const entry={cat:parsed.cat,amt:parsed.amt,note:parsed.note,date:entryDate.toISOString(),monthKey:entryMk,walletId:wallet};
+    const ref=await addDoc(collection(db,'incomes'),entry);entry.fid=ref.id;
+    S.incomes={...S.incomes,[entryMk]:[...(S.incomes[entryMk]||[]),entry]};
+  } else {
+    const wallet=S.expForm.wallet||'cash';
+    const entry={cat:parsed.cat,amt:parsed.amt,note:parsed.note,date:entryDate.toISOString(),monthKey:entryMk,walletId:wallet};
+    const ref=await addDoc(collection(db,'expenses'),entry);entry.fid=ref.id;
+    S.expenses={...S.expenses,[entryMk]:[...(S.expenses[entryMk]||[]),entry]};
+  }
+  S.quickAddFlash=`✅ ${cObj.e} ${cObj.n} — ${parsed.isIncome?'+':''}${fmt(parsed.amt)} тг${parsed.note?' · '+parsed.note:''}`;
+  setState({syncing:false});
+  const inp2=document.getElementById('quickAddInp');
+  if(inp2){inp2.value='';inp2.focus();}
+  clearTimeout(window._qaFlashTimer);
+  window._qaFlashTimer=setTimeout(()=>setState({quickAddFlash:null}),3000);
+}
+
 async function delIncome(fid){setState({syncing:true});await deleteDoc(doc(db,'incomes',fid));S.incomes={...S.incomes,[mk()]:S.incomes[mk()].filter(e=>e.fid!==fid)};setState({syncing:false});}
 
 async function addTransfer(){
@@ -964,6 +1019,15 @@ function render(){
     <div class="content-wrap">
 
     ${S.tab==='expenses'?`
+      <div class="card" style="margin-bottom:14px;border-color:#fbbf2440">
+        <span class="lbl">⚡ БЫСТРЫЙ ВВОД</span>
+        <div style="display:flex;gap:10px">
+          <input class="inp" id="quickAddInp" placeholder="1500 кофе  ·  +50000 зарплата" style="flex:1;font-size:15px"/>
+          <button class="btn" id="quickAddBtn">Добавить</button>
+        </div>
+        <div style="font-size:11px;color:#475569;margin-top:8px">Сумма и текст в любом порядке — категория подберётся сама. "+" в начале строки — это доход.</div>
+        ${S.quickAddFlash?`<div style="margin-top:8px;font-size:13px;color:#4ade80">${S.quickAddFlash}</div>`:''}
+      </div>
       <div class="card">
         <span class="lbl">ДОБАВИТЬ РАСХОД</span>
         <div class="grid2" style="margin-bottom:10px">
@@ -1170,6 +1234,14 @@ function render(){
   const nextYear=document.getElementById('nextYear');if(nextYear)nextYear.onclick=()=>setState({year:S.year+1,catFilter:null});
   document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>setState({tab:b.dataset.tab,catFilter:null}));
   document.querySelectorAll('.del-btn').forEach(b=>b.onclick=()=>{if(b.dataset.type==='exp')delExpense(b.dataset.fid);else delIncome(b.dataset.fid);});
+
+  // QUICK ADD
+  const quickAddBtn=document.getElementById('quickAddBtn');
+  const quickAddInp=document.getElementById('quickAddInp');
+  if(quickAddBtn&&quickAddInp){
+    quickAddBtn.onclick=()=>quickAdd();
+    quickAddInp.onkeydown=e=>{if(e.key==='Enter')quickAdd();};
+  }
 
   // Expense form
   const addExpBtn=document.getElementById('addExpBtn');
