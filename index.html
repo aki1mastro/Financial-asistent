@@ -149,6 +149,7 @@ let S = {
   transferForm:{from:'cash',to:'card',amtFrom:'',amtTo:'',note:'',date:''},
   exchangeRates: JSON.parse(localStorage.getItem('findir_rates')||'{"USD":540,"EUR":590,"RUB":6.5,"KGS":6.2}'),
   search:'',
+  budgets:{}, // {catId: monthlyLimit}
   csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
   analysis:'', loading:false, syncing:false, hideBalance:false,
   editEntry:null, // {fid, type, cat, amt, note, walletId}
@@ -215,12 +216,13 @@ function balance(){return totalInc()-totalExp();}
 
 async function loadAll(){
   try{
-    const [eSnap,iSnap,cSnap,wSnap,tSnap]=await Promise.all([
+    const [eSnap,iSnap,cSnap,wSnap,tSnap,bSnap]=await Promise.all([
       getDocs(collection(db,'expenses')),
       getDocs(collection(db,'incomes')),
       getDocs(collection(db,'categories')),
       getDocs(collection(db,'wallets')),
       getDocs(collection(db,'transfers')),
+      getDocs(collection(db,'budgets')),
     ]);
     const expenses={},incomes={};
     eSnap.forEach(d=>{const x={...d.data(),fid:d.id};if(!expenses[x.monthKey])expenses[x.monthKey]=[];expenses[x.monthKey].push(x);});
@@ -242,6 +244,11 @@ async function loadAll(){
     const transfers=[];
     tSnap.forEach(d=>transfers.push({...d.data(),fid:d.id}));
     S.transfers=transfers.sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+    // Load budgets
+    const budgets={};
+    bSnap.forEach(d=>{budgets[d.id]=d.data().amount||0;});
+    S.budgets=budgets;
 
     render();
   }catch(e){alert('Ошибка Firebase: '+e.message);}
@@ -376,6 +383,20 @@ async function initDefaultWallets(){
     for(const w of DEFAULT_WALLETS){const ref=await addDoc(collection(db,'wallets'),{...w,order:DEFAULT_WALLETS.indexOf(w)});w.fid=ref.id;}
     S.wallets=[...DEFAULT_WALLETS];render();
   }
+}
+
+async function setBudget(catId, amount){
+  setState({syncing:true});
+  const budgets={...S.budgets};
+  if(amount>0){
+    await setDoc(doc(db,'budgets',catId),{amount});
+    budgets[catId]=amount;
+  } else {
+    await deleteDoc(doc(db,'budgets',catId)).catch(()=>{});
+    delete budgets[catId];
+  }
+  S.budgets=budgets;
+  setState({syncing:false});
 }
 
 // Expenses/Incomes CRUD
@@ -977,6 +998,35 @@ function render(){
         <input class="inp" type="datetime-local" id="eDate" value="${S.expForm.date||nowLocal()}" style="font-size:13px;color:#94a3b8"/>
       </div>
       ${totalE>0?`<div class="grid2" style="margin-bottom:14px">${S.expCats.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).map(c=>`<div class="catcard" style="border-left:3px solid ${c.c}"><span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span><div style="text-align:right"><div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(tot[c.id])} тг</div><div style="font-size:10px;color:#475569">${Math.round(tot[c.id]/totalE*100)}%</div></div></div>`).join('')}</div>`:''}
+      ${(()=>{
+        const budgetCats=S.expCats.filter(c=>S.budgets[c.id]||tot[c.id]);
+        if(budgetCats.length===0) return '';
+        return `<div class="card" style="margin-bottom:14px">
+          <span class="lbl" style="margin-bottom:10px;display:block">🎯 БЮДЖЕТЫ НА МЕСЯЦ</span>
+          ${budgetCats.map(c=>{
+            const budget=S.budgets[c.id]||0;
+            const spent=tot[c.id]||0;
+            const pct=budget>0?Math.min(100,Math.round(spent/budget*100)):0;
+            const over=budget>0&&spent>budget;
+            return`<div style="margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+                <span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <input class="inp budget-inp" data-cat="${c.id}" type="number" inputmode="decimal" placeholder="лимит" value="${budget||''}" style="width:90px;padding:5px 8px;font-size:12px;text-align:right"/>
+                  <span style="font-size:10px;color:#475569">тг</span>
+                </div>
+              </div>
+              ${budget>0?`
+                <div style="background:#0f1117;border-radius:6px;height:6px;overflow:hidden">
+                  <div style="height:100%;width:${pct}%;background:${over?'#f87171':pct>80?'#fbbf24':'#4ade80'}"></div>
+                </div>
+                <div style="font-size:10px;color:${over?'#f87171':'#475569'};margin-top:3px">${fmt(spent)} / ${fmt(budget)} тг${over?' — превышен на '+fmt(spent-budget)+' тг':''}</div>
+              `:''}
+            </div>`;
+          }).join('')}
+          <div style="font-size:11px;color:#475569;margin-top:2px">Введи лимит по категории — сохранится автоматически. Оставь пустым, чтобы убрать бюджет.</div>
+        </div>`;
+      })()}
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <span class="lbl" style="margin:0">ЗАПИСИ — ${MONTHS[S.month]} (${eData.length})</span>
         <select class="sort-sel" data-sort-sel="1" style="background:#1a1f2e;border:1px solid #1e2a3a;color:#64748b;padding:3px 6px;border-radius:6px;font-size:11px;font-family:inherit;cursor:pointer;outline:none">
@@ -1225,6 +1275,12 @@ function render(){
   });
   document.querySelectorAll('.edit-cat-sel').forEach(sel=>sel.onchange=e=>{e.stopPropagation();setState({editEntry:{...S.editEntry,cat:e.target.value}});});
   document.querySelectorAll('.edit-wallet-sel').forEach(sel=>sel.onchange=e=>{e.stopPropagation();setState({editEntry:{...S.editEntry,walletId:e.target.value}});});
+
+  // BUDGETS
+  document.querySelectorAll('.budget-inp').forEach(inp=>{
+    inp.onchange=e=>setBudget(inp.dataset.cat, Number(e.target.value)||0);
+    inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
+  });
 
   // SEARCH
   const searchInp=document.getElementById('searchInp');
