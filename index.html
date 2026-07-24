@@ -67,8 +67,8 @@ const DEFAULT_INC = [
 ];
 
 const DEFAULT_WALLETS = [
-  {id:'cash', e:'💵', n:'Наличные', c:'#4ade80', currency:'KZT'},
-  {id:'card', e:'💳', n:'Карта',    c:'#60a5fa', currency:'KZT'},
+  {id:'cash', e:'💵', n:'Наличные', c:'#4ade80', currency:'KZT', startBalance:0},
+  {id:'card', e:'💳', n:'Карта',    c:'#60a5fa', currency:'KZT', startBalance:0},
 ];
 const CURRENCIES = ['KZT','USD','EUR','RUB','KGS'];
 
@@ -185,7 +185,7 @@ let S = {
   },
   walletSettings:{
     editId:null,
-    newWallet:{e:'💰',n:'',c:'#fbbf24',currency:'KZT'},
+    newWallet:{e:'💰',n:'',c:'#fbbf24',currency:'KZT',startBalance:''},
     editWallet:null,
   },
 };
@@ -220,7 +220,7 @@ function getWallet(id){
     || {e:'💰',n:'Кошелёк',c:'#64748b',id:'cash',currency:'KZT'};
 }
 function walletBalance(id){
-  let bal=0;
+  let bal=getWallet(id).startBalance||0;
   Object.values(S.expenses).forEach(list=>list.forEach(e=>{if((e.walletId||'cash')===id)bal-=e.amt;}));
   Object.values(S.incomes).forEach(list=>list.forEach(e=>{if((e.walletId||'cash')===id)bal+=e.amt;}));
   S.transfers.forEach(t=>{
@@ -367,12 +367,12 @@ async function resetCategoriesToDefault(type) {
 async function addWallet(){
   const nw=S.walletSettings.newWallet;
   if(!nw.n.trim()) return;
-  const newWal={id:'wal_'+Date.now(),e:nw.e,n:nw.n.trim(),c:nw.c,currency:nw.currency,order:Date.now()};
+  const newWal={id:'wal_'+Date.now(),e:nw.e,n:nw.n.trim(),c:nw.c,currency:nw.currency,startBalance:Number(nw.startBalance)||0,order:Date.now()};
   setState({syncing:true});
   const ref=await addDoc(collection(db,'wallets'),newWal);
   newWal.fid=ref.id;
   S.wallets=[...S.wallets,newWal];
-  setState({syncing:false,walletSettings:{...S.walletSettings,newWallet:{e:'💰',n:'',c:'#fbbf24',currency:'KZT'}}});
+  setState({syncing:false,walletSettings:{...S.walletSettings,newWallet:{e:'💰',n:'',c:'#fbbf24',currency:'KZT',startBalance:''}}});
 }
 async function updateWallet(walData){
   setState({syncing:true});
@@ -866,6 +866,7 @@ function renderWallets(){
       <input class="inp" id="nw-name" placeholder="Название кошелька" value="${ws.newWallet.n}" style="flex:1"/>
     </div>
     <select class="inp" id="nw-currency" style="margin-bottom:10px">${CURRENCIES.map(cur=>`<option value="${cur}"${ws.newWallet.currency===cur?' selected':''}>${cur}</option>`).join('')}</select>
+    <input class="inp" id="nw-startbalance" type="number" inputmode="decimal" placeholder="Начальный остаток (сколько есть сейчас)" value="${ws.newWallet.startBalance}" style="margin-bottom:10px"/>
     <div style="margin-bottom:10px">
       <div style="font-size:11px;color:#64748b;margin-bottom:8px;letter-spacing:1px">ЦВЕТ</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -885,6 +886,7 @@ function renderWallets(){
           <input class="inp" id="ew-name" value="${ws.editWallet.n}" style="flex:1"/>
         </div>
         <select class="inp" id="ew-currency" style="margin-bottom:10px">${CURRENCIES.map(cur=>`<option value="${cur}"${ws.editWallet.currency===cur?' selected':''}>${cur}</option>`).join('')}</select>
+        <input class="inp" id="ew-startbalance" type="number" inputmode="decimal" placeholder="Начальный остаток" value="${ws.editWallet.startBalance||0}" style="margin-bottom:10px"/>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
           ${COLORS.map(col=>`<button class="color-pick-wal-edit${ws.editWallet.c===col?' active':''}" data-color="${col}" style="width:26px;height:26px;border-radius:50%;background:${col};border:${ws.editWallet.c===col?'3px solid #fff':'2px solid transparent'};cursor:pointer;outline:none"></button>`).join('')}
         </div>
@@ -903,6 +905,7 @@ function renderWallets(){
             <button class="btn2" style="padding:6px 12px;font-size:13px;color:#f87171" data-del-wal="${w.id}">🗑️</button>
           </div>
         </div>
+        ${w.startBalance?`<div style="font-size:11px;color:#475569;margin-top:6px">Начальный остаток: ${fmt(w.startBalance)} ${w.currency}</div>`:''}
       `}
     </div>`;
   }).join('')}`;
@@ -1376,7 +1379,8 @@ function render(){
       const e=document.getElementById('nw-emoji')?.value||'💰';
       const n=document.getElementById('nw-name')?.value||'';
       const currency=document.getElementById('nw-currency')?.value||'KZT';
-      setState({walletSettings:{...S.walletSettings,newWallet:{...S.walletSettings.newWallet,e,n,currency}}});
+      const startBalance=document.getElementById('nw-startbalance')?.value||'';
+      setState({walletSettings:{...S.walletSettings,newWallet:{...S.walletSettings.newWallet,e,n,currency,startBalance}}});
       setTimeout(addWallet,0);
     };
     const nwName=document.getElementById('nw-name');
@@ -1400,7 +1404,8 @@ function render(){
     const e=document.getElementById('ew-emoji')?.value||S.walletSettings.editWallet.e;
     const n=document.getElementById('ew-name')?.value||S.walletSettings.editWallet.n;
     const currency=document.getElementById('ew-currency')?.value||S.walletSettings.editWallet.currency;
-    updateWallet({...S.walletSettings.editWallet,e,n,currency});
+    const startBalance=Number(document.getElementById('ew-startbalance')?.value)||0;
+    updateWallet({...S.walletSettings.editWallet,e,n,currency,startBalance});
   });
 
   // SETTINGS EVENTS
