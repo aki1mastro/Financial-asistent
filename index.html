@@ -214,6 +214,7 @@ function getIncCat(id){
     || {e:'💰',n:'Прочее',c:'#64748b',id:'other_i'};
 }
 function getWallet(id){
+  if(id==='unassigned') return {id:'unassigned',e:'❓',n:'Без кошелька',c:'#64748b',currency:'KZT',startBalance:0,virtual:true};
   return S.wallets.find(w=>w.id===id)
     || (S.ghostWallets[id] ? {...S.ghostWallets[id], deleted:true} : null)
     || S.wallets[0]
@@ -221,8 +222,8 @@ function getWallet(id){
 }
 function walletBalance(id){
   let bal=getWallet(id).startBalance||0;
-  Object.values(S.expenses).forEach(list=>list.forEach(e=>{if((e.walletId||'cash')===id)bal-=e.amt;}));
-  Object.values(S.incomes).forEach(list=>list.forEach(e=>{if((e.walletId||'cash')===id)bal+=e.amt;}));
+  Object.values(S.expenses).forEach(list=>list.forEach(e=>{if((e.walletId||'unassigned')===id)bal-=e.amt;}));
+  Object.values(S.incomes).forEach(list=>list.forEach(e=>{if((e.walletId||'unassigned')===id)bal+=e.amt;}));
   S.transfers.forEach(t=>{
     if(t.from===id)bal-=t.amtFrom;
     if(t.to===id)bal+=t.amtTo;
@@ -788,11 +789,12 @@ function renderSearch(){
 function renderWallets(){
   const ws=S.walletSettings;
   const usedCurrencies=[...new Set(S.wallets.map(w=>w.currency))].filter(c=>c!=='KZT');
+  const unassignedBal=walletBalance('unassigned');
   const totalKZT=S.wallets.reduce((s,w)=>{
     const bal=walletBalance(w.id);
     const rate=w.currency==='KZT'?1:(S.exchangeRates[w.currency]||1);
     return s+bal*rate;
-  },0);
+  },0)+unassignedBal;
   return`
   <div class="card" style="margin-bottom:14px">
     <span class="lbl">БАЛАНСЫ ПО КОШЕЛЬКАМ</span>
@@ -805,10 +807,17 @@ function renderWallets(){
         </div>
       </div>`;
     }).join('')}
-    ${S.wallets.length>1?`<div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;margin-top:6px;border-top:1px solid #1e2a3a">
+    ${unassignedBal!==0?`<div class="catcard" style="border-left:3px dashed #64748b;margin-bottom:6px;opacity:.8">
+      <span style="font-size:13px;color:#64748b">❓ Без кошелька <span style="font-size:10px">(старые записи)</span></span>
+      <div style="text-align:right">
+        <div style="font-size:15px;font-weight:700;color:${unassignedBal>=0?'#94a3b8':'#f87171'}">${unassignedBal>=0?'+':''}${fmt(unassignedBal)} тг</div>
+      </div>
+    </div>`:''}
+    ${S.wallets.length>1||unassignedBal!==0?`<div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;margin-top:6px;border-top:1px solid #1e2a3a">
       <span style="color:#f1f5f9;font-weight:700;font-size:13px">💰 ИТОГО (в тенге)</span>
       <span style="color:${totalKZT>=0?'#fbbf24':'#f87171'};font-weight:700;font-size:17px">${totalKZT>=0?'+':''}${fmt(totalKZT)} тг</span>
     </div>`:''}
+    ${unassignedBal!==0?`<div style="font-size:11px;color:#475569;margin-top:8px">«Без кошелька» — это операции, добавленные до появления кошельков. Зайди в них через список записей и выбери правильный кошелёк, чтобы распределить.</div>`:''}
     ${usedCurrencies.length>0?`
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid #1e2a3a22">
       <div style="font-size:11px;color:#64748b;margin-bottom:8px;letter-spacing:1px">КУРСЫ ВАЛЮТ К ТЕНГЕ (для итого)</div>
@@ -1070,6 +1079,7 @@ function render(){
                 </select>
                 <select class="inp edit-wallet-sel" data-fid="${item.fid}" style="flex:1">
                   ${S.wallets.map(w=>`<option value="${w.id}"${w.id===S.editEntry.walletId?' selected':''}>${w.e} ${w.n}</option>`).join('')}
+                  <option value="unassigned"${S.editEntry.walletId==='unassigned'?' selected':''}>❓ Без кошелька</option>
                 </select>
               </div>
               <div style="display:flex;gap:8px">
@@ -1082,10 +1092,10 @@ function render(){
               </div>
             </div>`;
           }
-          const iw=getWallet(item.walletId||'cash');
+          const iw=getWallet(item.walletId||'unassigned');
           return`<div class="entry-wrap">
             <div class="swipe-del-action" data-del-fid="${item.fid}" data-del-type="exp">🗑️</div>
-            <div class="entry entry-tap" data-open-edit="${item.fid}" data-open-type="exp" data-open-cat="${item.cat}" data-open-amt="${item.amt}" data-open-note="${(item.note||'').replace(/"/g,'&quot;')}" data-open-wallet="${item.walletId||'cash'}">
+            <div class="entry entry-tap" data-open-edit="${item.fid}" data-open-type="exp" data-open-cat="${item.cat}" data-open-amt="${item.amt}" data-open-note="${(item.note||'').replace(/"/g,'&quot;')}" data-open-wallet="${item.walletId||'unassigned'}">
               <div style="display:flex;align-items:center;gap:10px;flex:1">
                 <div class="dot" style="background:${c.c}"></div>
                 <div>
@@ -1140,6 +1150,7 @@ function render(){
                 </select>
                 <select class="inp edit-wallet-sel" data-fid="${item.fid}" style="flex:1">
                   ${S.wallets.map(w=>`<option value="${w.id}"${w.id===S.editEntry.walletId?' selected':''}>${w.e} ${w.n}</option>`).join('')}
+                  <option value="unassigned"${S.editEntry.walletId==='unassigned'?' selected':''}>❓ Без кошелька</option>
                 </select>
               </div>
               <div style="display:flex;gap:8px">
@@ -1152,10 +1163,10 @@ function render(){
               </div>
             </div>`;
           }
-          const iw=getWallet(item.walletId||'cash');
+          const iw=getWallet(item.walletId||'unassigned');
           return`<div class="entry-wrap">
             <div class="swipe-del-action" data-del-fid="${item.fid}" data-del-type="inc">🗑️</div>
-            <div class="entry entry-tap" data-open-edit="${item.fid}" data-open-type="inc" data-open-cat="${item.cat}" data-open-amt="${item.amt}" data-open-note="${(item.note||'').replace(/"/g,'&quot;')}" data-open-wallet="${item.walletId||'cash'}">
+            <div class="entry entry-tap" data-open-edit="${item.fid}" data-open-type="inc" data-open-cat="${item.cat}" data-open-amt="${item.amt}" data-open-note="${(item.note||'').replace(/"/g,'&quot;')}" data-open-wallet="${item.walletId||'unassigned'}">
               <div style="display:flex;align-items:center;gap:10px;flex:1">
                 <div class="dot" style="background:${c.c}"></div>
                 <div>
@@ -1290,7 +1301,7 @@ function render(){
     el.onclick=function(e){
       if(e.target.classList.contains('del-btn')||e.target.closest('.del-btn')) return;
       if(el.dataset.swiped==='1'){el.dataset.swiped='0';return;}
-      setState({editEntry:{fid:el.dataset.openEdit,type:el.dataset.openType,cat:el.dataset.openCat,amt:Number(el.dataset.openAmt),note:el.dataset.openNote||'',walletId:el.dataset.openWallet||'cash'}});
+      setState({editEntry:{fid:el.dataset.openEdit,type:el.dataset.openType,cat:el.dataset.openCat,amt:Number(el.dataset.openAmt),note:el.dataset.openNote||'',walletId:el.dataset.openWallet||'unassigned'}});
     };
   });
   document.querySelectorAll('[data-cancel-entry]').forEach(b=>b.onclick=e=>{e.stopPropagation();setState({editEntry:null});});
