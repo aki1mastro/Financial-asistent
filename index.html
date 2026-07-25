@@ -173,6 +173,7 @@ let S = {
   search:'',
   catFilter:null, // expense category id to filter records list by
   quickAddFlash:null,
+  reconcileWalletId:null,
   csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
   analysis:'', loading:false, syncing:false, hideBalance:false,
   editEntry:null, // {fid, type, cat, amt, note, walletId}
@@ -386,6 +387,25 @@ async function updateWallet(walData){
   S.wallets=S.wallets.map(w=>w.id===walData.id?walData:w);
   setState({syncing:false,walletSettings:{...S.walletSettings,editId:null,editWallet:null}});
 }
+async function reconcileWallet(walletId){
+  const inp=document.getElementById('reconcileInp');
+  if(!inp) return;
+  const real=Number(inp.value);
+  if(isNaN(real)||inp.value===''){
+    inp.style.borderColor='#f87171';
+    setTimeout(()=>{if(inp)inp.style.borderColor='';},600);
+    return;
+  }
+  const w=S.wallets.find(x=>x.id===walletId);
+  if(!w) return;
+  const currentBal=walletBalance(walletId);
+  const oldStart=w.startBalance||0;
+  const txnsSum=currentBal-oldStart;
+  const newStart=real-txnsSum;
+  await updateWallet({...w,startBalance:newStart});
+  setState({reconcileWalletId:null});
+}
+
 async function deleteWallet(wal){
   if(S.wallets.length<=1){alert('Должен остаться хотя бы один кошелёк.');return;}
   if(!confirm(`Удалить кошелёк "${wal.n}"?\n\nСтарые записи останутся с этим кошельком (будет показано серым).`)) return;
@@ -800,11 +820,21 @@ function renderWallets(){
     <span class="lbl">БАЛАНСЫ ПО КОШЕЛЬКАМ</span>
     ${S.wallets.map(w=>{
       const bal=walletBalance(w.id);
-      return`<div class="catcard" style="border-left:3px solid ${w.c};margin-bottom:6px">
-        <span style="font-size:13px;color:#94a3b8">${w.e} ${w.n}</span>
-        <div style="text-align:right">
-          <div style="font-size:15px;font-weight:700;color:${bal>=0?w.c:'#f87171'}">${bal>=0?'+':''}${fmt(bal)} ${w.currency}</div>
+      const isReconciling=S.reconcileWalletId===w.id;
+      return`<div class="catcard" style="border-left:3px solid ${w.c};margin-bottom:6px;flex-direction:column;align-items:stretch;gap:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;width:100%">
+          <span style="font-size:13px;color:#94a3b8">${w.e} ${w.n}</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="text-align:right">
+              <div style="font-size:15px;font-weight:700;color:${bal>=0?w.c:'#f87171'}">${bal>=0?'+':''}${fmt(bal)} ${w.currency}</div>
+            </div>
+            <button class="reconcile-btn" data-reconcile="${w.id}" style="background:none;border:none;color:${isReconciling?'#fbbf24':'#475569'};cursor:pointer;font-size:15px;padding:2px" title="Сверить с реальным балансом">🔄</button>
+          </div>
         </div>
+        ${isReconciling?`<div style="display:flex;gap:8px;margin-top:8px">
+          <input class="inp" id="reconcileInp" type="number" inputmode="decimal" placeholder="Сколько реально сейчас (${w.currency})" style="flex:1;font-size:13px;padding:8px 10px"/>
+          <button class="btn" data-reconcile-save="${w.id}" style="padding:8px 14px;font-size:13px">✓</button>
+        </div>`:''}
       </div>`;
     }).join('')}
     ${unassignedBal!==0?`<div class="catcard" style="border-left:3px dashed #64748b;margin-bottom:6px;opacity:.8">
@@ -1359,6 +1389,18 @@ function render(){
     if(type==='exp') delExpense(fid);
     else if(type==='inc') delIncome(fid);
   });
+
+  // WALLET RECONCILE
+  document.querySelectorAll('.reconcile-btn').forEach(b=>b.onclick=()=>{
+    const id=b.dataset.reconcile;
+    setState({reconcileWalletId:S.reconcileWalletId===id?null:id});
+  });
+  const reconcileInp=document.getElementById('reconcileInp');
+  if(reconcileInp){
+    reconcileInp.focus();
+    reconcileInp.onkeydown=e=>{if(e.key==='Enter')reconcileWallet(S.reconcileWalletId);};
+  }
+  document.querySelectorAll('[data-reconcile-save]').forEach(b=>b.onclick=()=>reconcileWallet(b.dataset.reconcileSave));
 
   // WALLETS TAB EVENTS
   document.querySelectorAll('.rate-inp').forEach(inp=>inp.onchange=e=>{
