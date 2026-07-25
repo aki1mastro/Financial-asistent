@@ -809,12 +809,11 @@ function renderSearch(){
 function renderWallets(){
   const ws=S.walletSettings;
   const usedCurrencies=[...new Set(S.wallets.map(w=>w.currency))].filter(c=>c!=='KZT');
-  const unassignedBal=walletBalance('unassigned');
   const totalKZT=S.wallets.reduce((s,w)=>{
     const bal=walletBalance(w.id);
     const rate=w.currency==='KZT'?1:(S.exchangeRates[w.currency]||1);
     return s+bal*rate;
-  },0)+unassignedBal;
+  },0);
   return`
   <div class="card" style="margin-bottom:14px">
     <span class="lbl">БАЛАНСЫ ПО КОШЕЛЬКАМ</span>
@@ -837,17 +836,10 @@ function renderWallets(){
         </div>`:''}
       </div>`;
     }).join('')}
-    ${unassignedBal!==0?`<div class="catcard" style="border-left:3px dashed #64748b;margin-bottom:6px;opacity:.8">
-      <span style="font-size:13px;color:#64748b">❓ Без кошелька <span style="font-size:10px">(старые записи)</span></span>
-      <div style="text-align:right">
-        <div style="font-size:15px;font-weight:700;color:${unassignedBal>=0?'#94a3b8':'#f87171'}">${unassignedBal>=0?'+':''}${fmt(unassignedBal)} тг</div>
-      </div>
-    </div>`:''}
-    ${S.wallets.length>1||unassignedBal!==0?`<div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;margin-top:6px;border-top:1px solid #1e2a3a">
+    ${S.wallets.length>1?`<div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;margin-top:6px;border-top:1px solid #1e2a3a">
       <span style="color:#f1f5f9;font-weight:700;font-size:13px">💰 ИТОГО (в тенге)</span>
       <span style="color:${totalKZT>=0?'#fbbf24':'#f87171'};font-weight:700;font-size:17px">${totalKZT>=0?'+':''}${fmt(totalKZT)} тг</span>
     </div>`:''}
-    ${unassignedBal!==0?`<div style="font-size:11px;color:#475569;margin-top:8px">«Без кошелька» — это операции, добавленные до появления кошельков. Зайди в них через список записей и выбери правильный кошелёк, чтобы распределить.</div>`:''}
     ${usedCurrencies.length>0?`
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid #1e2a3a22">
       <div style="font-size:11px;color:#64748b;margin-bottom:8px;letter-spacing:1px">КУРСЫ ВАЛЮТ К ТЕНГЕ (для итого)</div>
@@ -1522,4 +1514,3 @@ await initDefaultWallets();
 </script>
 </body>
 </html>
-
