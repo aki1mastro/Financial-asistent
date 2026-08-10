@@ -3,16 +3,27 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-<meta name="theme-color" content="#fbbf24"/>
+<meta name="theme-color" content="#0f1117"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="ФинДиректор"/>
 <title>💰 ФинДиректор</title>
+<link rel="manifest" href="manifest.json"/>
+<link rel="apple-touch-icon" href="icon-192.png"/>
 <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
 <div id="app"><div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#64748b;font-size:16px">⏳ Загрузка...</div></div>
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, setDoc, updateDoc }
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+         collection, getDocs, deleteDoc, doc, setDoc, updateDoc }
   from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+// Регистрация service worker — оболочка приложения работает офлайн
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
 
 const firebaseConfig = {
   apiKey: "AIzaSyD9DdWpxv8OKmF6hpuNwDlLlfpbOx3riAE",
@@ -23,7 +34,24 @@ const firebaseConfig = {
   appId: "1:702605526775:web:150d4038df8aa053dfb5f2"
 };
 const app = initializeApp(firebaseConfig);
-const db  = getFirestore(app);
+// Данные кэшируются в IndexedDB: чтение работает без интернета,
+// записи ставятся в очередь и уходят при восстановлении связи
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
+
+// --- Обёртки записи в Firestore ---
+// id генерируется на клиенте, ответ сервера не ждём: интерфейс отвечает мгновенно,
+// а без интернета Firestore ставит операцию в очередь и досылает при подключении.
+const syncErr = e => console.warn('Firestore sync:', e);
+function fbAdd(col, data){
+  const ref = doc(collection(db, col));
+  setDoc(ref, data).catch(syncErr);
+  return ref.id;
+}
+function fbSet(col, id, data){ setDoc(doc(db, col, id), data).catch(syncErr); }
+function fbUpdate(col, id, patch){ updateDoc(doc(db, col, id), patch).catch(syncErr); }
+function fbDel(col, id){ deleteDoc(doc(db, col, id)).catch(syncErr); }
 
 const MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 const COLORS = ['#4ade80','#fb923c','#60a5fa','#a78bfa','#f472b6','#34d399','#f9a8d4','#f87171','#a3e635','#fcd34d','#fb7185','#94a3b8','#fbbf24','#38bdf8','#e879f9','#f97316'];
@@ -67,8 +95,8 @@ const DEFAULT_INC = [
 ];
 
 const DEFAULT_WALLETS = [
-  {id:'cash', e:'💵', n:'Наличные', c:'#4ade80', currency:'KZT', startBalance:0},
-  {id:'card', e:'💳', n:'Карта',    c:'#60a5fa', currency:'KZT', startBalance:0},
+  {id:'cash', e:'💵', n:'Наличные', c:'#4ade80', currency:'KZT', initialBalance:0},
+  {id:'card', e:'💳', n:'Карта',    c:'#60a5fa', currency:'KZT', initialBalance:0},
 ];
 const CURRENCIES = ['KZT','USD','EUR','RUB','KGS'];
 
@@ -101,28 +129,6 @@ function guessCat(cat, note, cats) {
   const t = ((cat||'')+' '+(note||'')).toLowerCase();
   for (const c of cats) { if ((c.k||[]).some(k=>t.includes(k))) return c.id; }
   return cats[cats.length-1]?.id || 'other';
-}
-function parseAmountToken(raw){
-  let s=raw.replace(/\s+/g,'');
-  const commaCount=(s.match(/,/g)||[]).length;
-  const dotCount=(s.match(/\./g)||[]).length;
-  if(commaCount===1&&dotCount===0) s=s.replace(',','.');
-  else s=s.replace(/,/g,'');
-  return parseFloat(s);
-}
-function parseQuickAdd(raw){
-  let text=(raw||'').trim();
-  if(!text) return null;
-  const isIncome=text.startsWith('+');
-  if(isIncome) text=text.slice(1).trim();
-  const m=text.match(/\d[\d\s]*(?:[.,]\d+)?/);
-  if(!m) return null;
-  const amt=parseAmountToken(m[0]);
-  if(!amt||amt<=0) return null;
-  const note=(text.slice(0,m.index)+' '+text.slice(m.index+m[0].length)).replace(/\s+/g,' ').trim();
-  const cats=isIncome?S.incCats:S.expCats;
-  const cat=guessCat('',note,cats);
-  return {isIncome,amt,note,cat};
 }
 function parseDate(s) {
   if (!s) return new Date(); s=s.trim();
@@ -171,10 +177,8 @@ let S = {
   transferForm:{from:'cash',to:'card',amtFrom:'',amtTo:'',note:'',date:''},
   exchangeRates: JSON.parse(localStorage.getItem('findir_rates')||'{"USD":540,"EUR":590,"RUB":6.5,"KGS":6.2}'),
   search:'',
-  catFilter:null, // expense category id to filter records list by
-  quickAddFlash:null,
-  reconcileWalletId:null,
-  csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:''},
+  budgets:{}, // {catId: monthlyLimit}
+  csv:{step:'idle',headers:[],rows:[],map:{date:'',amt:'',cat:'',note:''},preview:[],info:'',wallet:''},
   analysis:'', loading:false, syncing:false, hideBalance:false,
   editEntry:null, // {fid, type, cat, amt, note, walletId}
   ghostCats:{}, // deleted categories kept for display
@@ -186,7 +190,7 @@ let S = {
   },
   walletSettings:{
     editId:null,
-    newWallet:{e:'💰',n:'',c:'#fbbf24',currency:'KZT',startBalance:''},
+    newWallet:{e:'💰',n:'',c:'#fbbf24',currency:'KZT',initialBalance:''},
     editWallet:null,
   },
 };
@@ -215,16 +219,17 @@ function getIncCat(id){
     || {e:'💰',n:'Прочее',c:'#64748b',id:'other_i'};
 }
 function getWallet(id){
-  if(id==='unassigned') return {id:'unassigned',e:'❓',n:'Без кошелька',c:'#64748b',currency:'KZT',startBalance:0,virtual:true};
   return S.wallets.find(w=>w.id===id)
     || (S.ghostWallets[id] ? {...S.ghostWallets[id], deleted:true} : null)
     || S.wallets[0]
     || {e:'💰',n:'Кошелёк',c:'#64748b',id:'cash',currency:'KZT'};
 }
 function walletBalance(id){
-  let bal=getWallet(id).startBalance||0;
-  Object.values(S.expenses).forEach(list=>list.forEach(e=>{if((e.walletId||'unassigned')===id)bal-=e.amt;}));
-  Object.values(S.incomes).forEach(list=>list.forEach(e=>{if((e.walletId||'unassigned')===id)bal+=e.amt;}));
+  // Стартовый остаток — то, что лежало в кошельке до начала учёта
+  const w=S.wallets.find(x=>x.id===id);
+  let bal=Number(w&&w.initialBalance||0);
+  Object.values(S.expenses).forEach(list=>list.forEach(e=>{if((e.walletId||'cash')===id)bal-=e.amt;}));
+  Object.values(S.incomes).forEach(list=>list.forEach(e=>{if((e.walletId||'cash')===id)bal+=e.amt;}));
   S.transfers.forEach(t=>{
     if(t.from===id)bal-=t.amtFrom;
     if(t.to===id)bal+=t.amtTo;
@@ -241,12 +246,13 @@ function balance(){return totalInc()-totalExp();}
 
 async function loadAll(){
   try{
-    const [eSnap,iSnap,cSnap,wSnap,tSnap]=await Promise.all([
+    const [eSnap,iSnap,cSnap,wSnap,tSnap,bSnap]=await Promise.all([
       getDocs(collection(db,'expenses')),
       getDocs(collection(db,'incomes')),
       getDocs(collection(db,'categories')),
       getDocs(collection(db,'wallets')),
       getDocs(collection(db,'transfers')),
+      getDocs(collection(db,'budgets')),
     ]);
     const expenses={},incomes={};
     eSnap.forEach(d=>{const x={...d.data(),fid:d.id};if(!expenses[x.monthKey])expenses[x.monthKey]=[];expenses[x.monthKey].push(x);});
@@ -269,6 +275,11 @@ async function loadAll(){
     tSnap.forEach(d=>transfers.push({...d.data(),fid:d.id}));
     S.transfers=transfers.sort((a,b)=>new Date(b.date)-new Date(a.date));
 
+    // Load budgets
+    const budgets={};
+    bSnap.forEach(d=>{budgets[d.id]=d.data().amount||0;});
+    S.budgets=budgets;
+
     render();
   }catch(e){alert('Ошибка Firebase: '+e.message);}
 }
@@ -278,10 +289,9 @@ async function saveCategoryToFirebase(catData){
   setState({syncing:true});
   const data={...catData,k:catData.k||[]};
   if(catData.fid){
-    await updateDoc(doc(db,'categories',catData.fid),data);
+    fbUpdate('categories',catData.fid,data);
   } else {
-    const ref=await addDoc(collection(db,'categories'),data);
-    catData.fid=ref.id;
+    catData.fid=fbAdd('categories',data);
   }
   setState({syncing:false});
   return catData;
@@ -292,8 +302,7 @@ async function addCategory(){
   if(!nc.n.trim()) return;
   const newCat={id:'cat_'+Date.now(),e:nc.e,n:nc.n.trim(),c:nc.c,type:nc.type,k:[],order:Date.now()};
   setState({syncing:true});
-  const ref=await addDoc(collection(db,'categories'),newCat);
-  newCat.fid=ref.id;
+  newCat.fid=fbAdd('categories',newCat);
   if(nc.type==='expense') S.expCats=[...S.expCats,newCat];
   else S.incCats=[...S.incCats,newCat];
   setState({syncing:false,settings:{...S.settings,newCat:{e:'💼',n:'',c:'#4ade80',type:nc.type}}});
@@ -302,11 +311,10 @@ async function addCategory(){
 async function updateCategory(catData){
   setState({syncing:true});
   if(catData.fid){
-    await updateDoc(doc(db,'categories',catData.fid),catData);
+    fbUpdate('categories',catData.fid,catData);
   } else {
-    // Was a default cat - save to firebase
-    const ref=await addDoc(collection(db,'categories'),catData);
-    catData.fid=ref.id;
+    // Была стандартная категория — сохраняем в Firebase
+    catData.fid=fbAdd('categories',catData);
   }
   if(catData.type==='expense') S.expCats=S.expCats.map(c=>c.id===catData.id?catData:c);
   else S.incCats=S.incCats.map(c=>c.id===catData.id?catData:c);
@@ -319,7 +327,7 @@ async function deleteCategory(cat){
   // Save to ghostCats so old records can still display the name
   S.ghostCats = {...S.ghostCats, [cat.id]: {...cat, deleted:true}};
   // Remove from active list
-  if (cat.fid) await deleteDoc(doc(db,'categories',cat.fid));
+  if (cat.fid) fbDel('categories',cat.fid);
   if (cat.type==='expense') S.expCats = S.expCats.filter(c=>c.id!==cat.id);
   else S.incCats = S.incCats.filter(c=>c.id!==cat.id);
   setState({syncing:false});
@@ -329,8 +337,8 @@ async function deleteCategory(cat){
 async function initDefaultCategories(){
   const snap=await getDocs(collection(db,'categories'));
   if(snap.empty){
-    for(const c of DEFAULT_EXP){const ref=await addDoc(collection(db,'categories'),{...c,type:'expense',order:DEFAULT_EXP.indexOf(c)});c.fid=ref.id;}
-    for(const c of DEFAULT_INC){const ref=await addDoc(collection(db,'categories'),{...c,type:'income',order:DEFAULT_INC.indexOf(c)});c.fid=ref.id;}
+    DEFAULT_EXP.forEach((c,i)=>{c.fid=fbAdd('categories',{...c,type:'expense',order:i});});
+    DEFAULT_INC.forEach((c,i)=>{c.fid=fbAdd('categories',{...c,type:'income',order:i});});
     S.expCats=[...DEFAULT_EXP];S.incCats=[...DEFAULT_INC];render();
   }
 }
@@ -345,7 +353,7 @@ async function resetCategoriesToDefault(type) {
   for (const d of snap.docs) {
     const data = d.data();
     if (data.type === type || (type === 'expense' && !data.type)) {
-      await deleteDoc(doc(db, 'categories', d.id));
+      fbDel('categories', d.id);
     }
   }
 
@@ -354,8 +362,7 @@ async function resetCategoriesToDefault(type) {
   const newCats = [];
   for (let i = 0; i < defaults.length; i++) {
     const cat = {...defaults[i], type, order: i};
-    const ref = await addDoc(collection(db, 'categories'), cat);
-    newCats.push({...cat, fid: ref.id});
+    newCats.push({...cat, fid: fbAdd('categories', cat)});
   }
 
   if (type === 'expense') S.expCats = newCats;
@@ -369,58 +376,51 @@ async function resetCategoriesToDefault(type) {
 async function addWallet(){
   const nw=S.walletSettings.newWallet;
   if(!nw.n.trim()) return;
-  const newWal={id:'wal_'+Date.now(),e:nw.e,n:nw.n.trim(),c:nw.c,currency:nw.currency,startBalance:Number(nw.startBalance)||0,order:Date.now()};
+  const newWal={id:'wal_'+Date.now(),e:nw.e,n:nw.n.trim(),c:nw.c,currency:nw.currency,initialBalance:Number(nw.initialBalance)||0,order:Date.now()};
   setState({syncing:true});
-  const ref=await addDoc(collection(db,'wallets'),newWal);
-  newWal.fid=ref.id;
+  newWal.fid=fbAdd('wallets',newWal);
   S.wallets=[...S.wallets,newWal];
-  setState({syncing:false,walletSettings:{...S.walletSettings,newWallet:{e:'💰',n:'',c:'#fbbf24',currency:'KZT',startBalance:''}}});
+  setState({syncing:false,walletSettings:{...S.walletSettings,newWallet:{e:'💰',n:'',c:'#fbbf24',currency:'KZT',initialBalance:''}}});
 }
 async function updateWallet(walData){
   setState({syncing:true});
   if(walData.fid){
-    await updateDoc(doc(db,'wallets',walData.fid),walData);
+    fbUpdate('wallets',walData.fid,walData);
   } else {
-    const ref=await addDoc(collection(db,'wallets'),walData);
-    walData.fid=ref.id;
+    walData.fid=fbAdd('wallets',walData);
   }
   S.wallets=S.wallets.map(w=>w.id===walData.id?walData:w);
   setState({syncing:false,walletSettings:{...S.walletSettings,editId:null,editWallet:null}});
 }
-async function reconcileWallet(walletId){
-  const inp=document.getElementById('reconcileInp');
-  if(!inp) return;
-  const real=Number(inp.value);
-  if(isNaN(real)||inp.value===''){
-    inp.style.borderColor='#f87171';
-    setTimeout(()=>{if(inp)inp.style.borderColor='';},600);
-    return;
-  }
-  const w=S.wallets.find(x=>x.id===walletId);
-  if(!w) return;
-  const currentBal=walletBalance(walletId);
-  const oldStart=w.startBalance||0;
-  const txnsSum=currentBal-oldStart;
-  const newStart=real-txnsSum;
-  await updateWallet({...w,startBalance:newStart});
-  setState({reconcileWalletId:null});
-}
-
 async function deleteWallet(wal){
   if(S.wallets.length<=1){alert('Должен остаться хотя бы один кошелёк.');return;}
   if(!confirm(`Удалить кошелёк "${wal.n}"?\n\nСтарые записи останутся с этим кошельком (будет показано серым).`)) return;
   setState({syncing:true});
   S.ghostWallets={...S.ghostWallets,[wal.id]:{...wal,deleted:true}};
-  if(wal.fid) await deleteDoc(doc(db,'wallets',wal.fid));
+  if(wal.fid) fbDel('wallets',wal.fid);
   S.wallets=S.wallets.filter(w=>w.id!==wal.id);
   setState({syncing:false});
 }
 async function initDefaultWallets(){
   const snap=await getDocs(collection(db,'wallets'));
   if(snap.empty){
-    for(const w of DEFAULT_WALLETS){const ref=await addDoc(collection(db,'wallets'),{...w,order:DEFAULT_WALLETS.indexOf(w)});w.fid=ref.id;}
+    DEFAULT_WALLETS.forEach((w,i)=>{w.fid=fbAdd('wallets',{...w,order:i});});
     S.wallets=[...DEFAULT_WALLETS];render();
   }
+}
+
+async function setBudget(catId, amount){
+  setState({syncing:true});
+  const budgets={...S.budgets};
+  if(amount>0){
+    fbSet('budgets',catId,{amount});
+    budgets[catId]=amount;
+  } else {
+    fbDel('budgets',catId);
+    delete budgets[catId];
+  }
+  S.budgets=budgets;
+  setState({syncing:false});
 }
 
 // Expenses/Incomes CRUD
@@ -430,7 +430,7 @@ async function addExpense(){
   const entryDate = S.expForm.date ? new Date(S.expForm.date) : new Date();
   const entryMk = `${entryDate.getFullYear()}-${entryDate.getMonth()}`;
   const entry={cat:S.expForm.cat,amt,note:S.expForm.note,date:entryDate.toISOString(),monthKey:entryMk,walletId:S.expForm.wallet||'cash'};
-  const ref=await addDoc(collection(db,'expenses'),entry);entry.fid=ref.id;
+  entry.fid=fbAdd('expenses',entry);
   S.expenses={...S.expenses,[entryMk]:[...(S.expenses[entryMk]||[]),entry]};
   setState({expForm:{...S.expForm,amt:'',note:''},syncing:false});
 }
@@ -440,44 +440,18 @@ async function addIncome(){
   const entryDate = S.incForm.date ? new Date(S.incForm.date) : new Date();
   const entryMk = `${entryDate.getFullYear()}-${entryDate.getMonth()}`;
   const entry={cat:S.incForm.cat,amt,note:S.incForm.note,date:entryDate.toISOString(),monthKey:entryMk,walletId:S.incForm.wallet||'cash'};
-  const ref=await addDoc(collection(db,'incomes'),entry);entry.fid=ref.id;
+  entry.fid=fbAdd('incomes',entry);
   S.incomes={...S.incomes,[entryMk]:[...(S.incomes[entryMk]||[]),entry]};
   setState({incForm:{...S.incForm,amt:'',note:''},syncing:false});
 }
-async function delExpense(fid){setState({syncing:true});await deleteDoc(doc(db,'expenses',fid));S.expenses={...S.expenses,[mk()]:S.expenses[mk()].filter(e=>e.fid!==fid)};setState({syncing:false});}
-async function quickAdd(){
-  const inp=document.getElementById('quickAddInp');
-  if(!inp) return;
-  const parsed=parseQuickAdd(inp.value);
-  if(!parsed){
-    inp.style.borderColor='#f87171';
-    setTimeout(()=>{if(inp)inp.style.borderColor='';},600);
-    return;
-  }
-  setState({syncing:true});
-  const entryDate=new Date();
-  const entryMk=`${entryDate.getFullYear()}-${entryDate.getMonth()}`;
-  const cObj=parsed.isIncome?getIncCat(parsed.cat):getExpCat(parsed.cat);
-  if(parsed.isIncome){
-    const wallet=S.incForm.wallet||'cash';
-    const entry={cat:parsed.cat,amt:parsed.amt,note:parsed.note,date:entryDate.toISOString(),monthKey:entryMk,walletId:wallet};
-    const ref=await addDoc(collection(db,'incomes'),entry);entry.fid=ref.id;
-    S.incomes={...S.incomes,[entryMk]:[...(S.incomes[entryMk]||[]),entry]};
-  } else {
-    const wallet=S.expForm.wallet||'cash';
-    const entry={cat:parsed.cat,amt:parsed.amt,note:parsed.note,date:entryDate.toISOString(),monthKey:entryMk,walletId:wallet};
-    const ref=await addDoc(collection(db,'expenses'),entry);entry.fid=ref.id;
-    S.expenses={...S.expenses,[entryMk]:[...(S.expenses[entryMk]||[]),entry]};
-  }
-  S.quickAddFlash=`✅ ${cObj.e} ${cObj.n} — ${parsed.isIncome?'+':''}${fmt(parsed.amt)} тг${parsed.note?' · '+parsed.note:''}`;
-  setState({syncing:false});
-  const inp2=document.getElementById('quickAddInp');
-  if(inp2){inp2.value='';inp2.focus();}
-  clearTimeout(window._qaFlashTimer);
-  window._qaFlashTimer=setTimeout(()=>setState({quickAddFlash:null}),3000);
+// Удаляем из любого месяца: запись могли открыть через поиск, а не из текущего списка
+function dropFromAllMonths(store, fid){
+  const next={};
+  for(const k of Object.keys(store)) next[k]=store[k].filter(e=>e.fid!==fid);
+  return next;
 }
-
-async function delIncome(fid){setState({syncing:true});await deleteDoc(doc(db,'incomes',fid));S.incomes={...S.incomes,[mk()]:S.incomes[mk()].filter(e=>e.fid!==fid)};setState({syncing:false});}
+function delExpense(fid){ fbDel('expenses',fid); setState({expenses:dropFromAllMonths(S.expenses,fid)}); }
+function delIncome(fid){ fbDel('incomes',fid); setState({incomes:dropFromAllMonths(S.incomes,fid)}); }
 
 async function addTransfer(){
   const amtFrom=Number(S.transferForm.amtFrom);
@@ -489,26 +463,24 @@ async function addTransfer(){
   setState({syncing:true});
   const entryDate=S.transferForm.date?new Date(S.transferForm.date):new Date();
   const entry={from:S.transferForm.from,to:S.transferForm.to,amtFrom,amtTo,note:S.transferForm.note,date:entryDate.toISOString()};
-  const ref=await addDoc(collection(db,'transfers'),entry);entry.fid=ref.id;
+  entry.fid=fbAdd('transfers',entry);
   S.transfers=[entry,...S.transfers];
   setState({transferForm:{...S.transferForm,amtFrom:'',amtTo:'',note:''},syncing:false});
 }
 async function delTransfer(fid){
   setState({syncing:true});
-  await deleteDoc(doc(db,'transfers',fid));
+  fbDel('transfers',fid);
   S.transfers=S.transfers.filter(t=>t.fid!==fid);
   setState({syncing:false});
 }
 
-async function updateEntry(type, fid, patch){
-  setState({syncing:true});
-  await updateDoc(doc(db, type==='exp'?'expenses':'incomes', fid), patch);
-  if(type==='exp'){
-    S.expenses={...S.expenses,[mk()]:S.expenses[mk()].map(e=>e.fid===fid?{...e,...patch}:e)};
-  } else {
-    S.incomes={...S.incomes,[mk()]:S.incomes[mk()].map(e=>e.fid===fid?{...e,...patch}:e)};
-  }
-  setState({syncing:false, editEntry:null});
+function updateEntry(type, fid, patch){
+  const col=type==='exp'?'expenses':'incomes';
+  fbUpdate(col, fid, patch);
+  const store=type==='exp'?S.expenses:S.incomes;
+  const next={};
+  for(const k of Object.keys(store)) next[k]=store[k].map(e=>e.fid===fid?{...e,...patch}:e);
+  setState(type==='exp'?{expenses:next,editEntry:null}:{incomes:next,editEntry:null});
 }
 
 function handleFile(file){
@@ -533,11 +505,13 @@ function buildPreview(){
   });
   setState({csv:{...S.csv,step:'preview',preview}});
 }
-async function importCSV(){
+function importCSV(){
+  // Кошелёк обязателен: без него импорт свалится в кошелёк по умолчанию и перекосит балансы
+  const walletId=S.csv.wallet||S.wallets[0]?.id||'cash';
   setState({syncing:true});
   for(const r of S.csv.preview){
-    const entry={cat:r.cat,amt:r.amt,note:r.note,date:r.date,monthKey:r.mk};
-    const ref=await addDoc(collection(db,'expenses'),entry);entry.fid=ref.id;
+    const entry={cat:r.cat,amt:r.amt,note:r.note,date:r.date,monthKey:r.mk,walletId};
+    entry.fid=fbAdd('expenses',entry);
     S.expenses={...S.expenses,[r.mk]:[...(S.expenses[r.mk]||[]),entry]};
   }
   setState({csv:{...S.csv,step:'done'},syncing:false});
@@ -819,21 +793,12 @@ function renderWallets(){
     <span class="lbl">БАЛАНСЫ ПО КОШЕЛЬКАМ</span>
     ${S.wallets.map(w=>{
       const bal=walletBalance(w.id);
-      const isReconciling=S.reconcileWalletId===w.id;
-      return`<div class="catcard" style="border-left:3px solid ${w.c};margin-bottom:6px;flex-direction:column;align-items:stretch;gap:0">
-        <div style="display:flex;justify-content:space-between;align-items:center;width:100%">
-          <span style="font-size:13px;color:#94a3b8">${w.e} ${w.n}</span>
-          <div style="display:flex;align-items:center;gap:10px">
-            <div style="text-align:right">
-              <div style="font-size:15px;font-weight:700;color:${bal>=0?w.c:'#f87171'}">${bal>=0?'+':''}${fmt(bal)} ${w.currency}</div>
-            </div>
-            <button class="reconcile-btn" data-reconcile="${w.id}" style="background:none;border:none;color:${isReconciling?'#fbbf24':'#475569'};cursor:pointer;font-size:15px;padding:2px" title="Сверить с реальным балансом">🔄</button>
-          </div>
+      return`<div class="catcard" style="border-left:3px solid ${w.c};margin-bottom:6px">
+        <span style="font-size:13px;color:#94a3b8">${w.e} ${w.n}</span>
+        <div style="text-align:right">
+          <div style="font-size:15px;font-weight:700;color:${bal>=0?w.c:'#f87171'}">${bal>=0?'+':''}${fmt(bal)} ${w.currency}</div>
+          ${w.initialBalance?`<div style="font-size:10px;color:#475569">старт ${fmt(w.initialBalance)}</div>`:''}
         </div>
-        ${isReconciling?`<div style="display:flex;gap:8px;margin-top:8px">
-          <input class="inp" id="reconcileInp" type="number" inputmode="decimal" placeholder="Сколько реально сейчас (${w.currency})" style="flex:1;font-size:13px;padding:8px 10px"/>
-          <button class="btn" data-reconcile-save="${w.id}" style="padding:8px 14px;font-size:13px">✓</button>
-        </div>`:''}
       </div>`;
     }).join('')}
     ${S.wallets.length>1?`<div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;margin-top:6px;border-top:1px solid #1e2a3a">
@@ -896,8 +861,11 @@ function renderWallets(){
       <input class="inp" id="nw-emoji" placeholder="Эмодзи" value="${ws.newWallet.e}" style="width:60px;text-align:center;font-size:20px"/>
       <input class="inp" id="nw-name" placeholder="Название кошелька" value="${ws.newWallet.n}" style="flex:1"/>
     </div>
-    <select class="inp" id="nw-currency" style="margin-bottom:10px">${CURRENCIES.map(cur=>`<option value="${cur}"${ws.newWallet.currency===cur?' selected':''}>${cur}</option>`).join('')}</select>
-    <input class="inp" id="nw-startbalance" type="number" inputmode="decimal" placeholder="Начальный остаток (сколько есть сейчас)" value="${ws.newWallet.startBalance}" style="margin-bottom:10px"/>
+    <div class="grid2" style="margin-bottom:10px">
+      <select class="inp" id="nw-currency">${CURRENCIES.map(cur=>`<option value="${cur}"${ws.newWallet.currency===cur?' selected':''}>${cur}</option>`).join('')}</select>
+      <input class="inp" id="nw-init" type="number" inputmode="decimal" placeholder="Остаток сейчас" value="${ws.newWallet.initialBalance}"/>
+    </div>
+    <div style="font-size:11px;color:#475569;margin-bottom:10px">Остаток — сколько уже лежит в кошельке до начала учёта. Дальше он меняется сам.</div>
     <div style="margin-bottom:10px">
       <div style="font-size:11px;color:#64748b;margin-bottom:8px;letter-spacing:1px">ЦВЕТ</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -916,8 +884,10 @@ function renderWallets(){
           <input class="inp" id="ew-emoji" value="${ws.editWallet.e}" style="width:60px;text-align:center;font-size:20px"/>
           <input class="inp" id="ew-name" value="${ws.editWallet.n}" style="flex:1"/>
         </div>
-        <select class="inp" id="ew-currency" style="margin-bottom:10px">${CURRENCIES.map(cur=>`<option value="${cur}"${ws.editWallet.currency===cur?' selected':''}>${cur}</option>`).join('')}</select>
-        <input class="inp" id="ew-startbalance" type="number" inputmode="decimal" placeholder="Начальный остаток" value="${ws.editWallet.startBalance||0}" style="margin-bottom:10px"/>
+        <div class="grid2" style="margin-bottom:10px">
+          <select class="inp" id="ew-currency">${CURRENCIES.map(cur=>`<option value="${cur}"${ws.editWallet.currency===cur?' selected':''}>${cur}</option>`).join('')}</select>
+          <input class="inp" id="ew-init" type="number" inputmode="decimal" placeholder="Стартовый остаток" value="${ws.editWallet.initialBalance||0}"/>
+        </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
           ${COLORS.map(col=>`<button class="color-pick-wal-edit${ws.editWallet.c===col?' active':''}" data-color="${col}" style="width:26px;height:26px;border-radius:50%;background:${col};border:${ws.editWallet.c===col?'3px solid #fff':'2px solid transparent'};cursor:pointer;outline:none"></button>`).join('')}
         </div>
@@ -936,7 +906,6 @@ function renderWallets(){
             <button class="btn2" style="padding:6px 12px;font-size:13px;color:#f87171" data-del-wal="${w.id}">🗑️</button>
           </div>
         </div>
-        ${w.startBalance?`<div style="font-size:11px;color:#475569;margin-top:6px">Начальный остаток: ${fmt(w.startBalance)} ${w.currency}</div>`:''}
       `}
     </div>`;
   }).join('')}`;
@@ -1053,15 +1022,6 @@ function render(){
     <div class="content-wrap">
 
     ${S.tab==='expenses'?`
-      <div class="card" style="margin-bottom:14px;border-color:#fbbf2440">
-        <span class="lbl">⚡ БЫСТРЫЙ ВВОД</span>
-        <div style="display:flex;gap:10px">
-          <input class="inp" id="quickAddInp" placeholder="1500 кофе  ·  +50000 зарплата" style="flex:1;font-size:15px"/>
-          <button class="btn" id="quickAddBtn">Добавить</button>
-        </div>
-        <div style="font-size:11px;color:#475569;margin-top:8px">Сумма и текст в любом порядке — категория подберётся сама. "+" в начале строки — это доход.</div>
-        ${S.quickAddFlash?`<div style="margin-top:8px;font-size:13px;color:#4ade80">${S.quickAddFlash}</div>`:''}
-      </div>
       <div class="card">
         <span class="lbl">ДОБАВИТЬ РАСХОД</span>
         <div class="grid2" style="margin-bottom:10px">
@@ -1075,9 +1035,38 @@ function render(){
         </div>
         <input class="inp" type="datetime-local" id="eDate" value="${S.expForm.date||nowLocal()}" style="font-size:13px;color:#94a3b8"/>
       </div>
-      ${totalE>0?`<div class="grid2" style="margin-bottom:14px">${S.expCats.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).map(c=>`<div class="catcard cat-filter-card" data-cat-filter="${c.id}" style="border-left:3px solid ${c.c};cursor:pointer;${S.catFilter===c.id?'outline:2px solid '+c.c+';background:#1e2a3a':''}"><span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span><div style="text-align:right"><div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(tot[c.id])} тг</div><div style="font-size:10px;color:#475569">${Math.round(tot[c.id]/totalE*100)}%</div></div></div>`).join('')}</div>`:''}
+      ${totalE>0?`<div class="grid2" style="margin-bottom:14px">${S.expCats.filter(c=>tot[c.id]).sort((a,b)=>tot[b.id]-tot[a.id]).map(c=>`<div class="catcard" style="border-left:3px solid ${c.c}"><span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span><div style="text-align:right"><div style="font-size:13px;font-weight:700;color:${c.c}">${fmt(tot[c.id])} тг</div><div style="font-size:10px;color:#475569">${Math.round(tot[c.id]/totalE*100)}%</div></div></div>`).join('')}</div>`:''}
+      ${(()=>{
+        const budgetCats=S.expCats.filter(c=>S.budgets[c.id]||tot[c.id]);
+        if(budgetCats.length===0) return '';
+        return `<div class="card" style="margin-bottom:14px">
+          <span class="lbl" style="margin-bottom:10px;display:block">🎯 БЮДЖЕТЫ НА МЕСЯЦ</span>
+          ${budgetCats.map(c=>{
+            const budget=S.budgets[c.id]||0;
+            const spent=tot[c.id]||0;
+            const pct=budget>0?Math.min(100,Math.round(spent/budget*100)):0;
+            const over=budget>0&&spent>budget;
+            return`<div style="margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+                <span style="font-size:12px;color:#94a3b8">${c.e} ${c.n}</span>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <input class="inp budget-inp" data-cat="${c.id}" type="number" inputmode="decimal" placeholder="лимит" value="${budget||''}" style="width:90px;padding:5px 8px;font-size:12px;text-align:right"/>
+                  <span style="font-size:10px;color:#475569">тг</span>
+                </div>
+              </div>
+              ${budget>0?`
+                <div style="background:#0f1117;border-radius:6px;height:6px;overflow:hidden">
+                  <div style="height:100%;width:${pct}%;background:${over?'#f87171':pct>80?'#fbbf24':'#4ade80'}"></div>
+                </div>
+                <div style="font-size:10px;color:${over?'#f87171':'#475569'};margin-top:3px">${fmt(spent)} / ${fmt(budget)} тг${over?' — превышен на '+fmt(spent-budget)+' тг':''}</div>
+              `:''}
+            </div>`;
+          }).join('')}
+          <div style="font-size:11px;color:#475569;margin-top:2px">Введи лимит по категории — сохранится автоматически. Оставь пустым, чтобы убрать бюджет.</div>
+        </div>`;
+      })()}
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <span class="lbl" style="margin:0">ЗАПИСИ — ${MONTHS[S.month]} (${S.catFilter?eData.filter(e=>e.cat===S.catFilter).length:eData.length})</span>
+        <span class="lbl" style="margin:0">ЗАПИСИ — ${MONTHS[S.month]} (${eData.length})</span>
         <select class="sort-sel" data-sort-sel="1" style="background:#1a1f2e;border:1px solid #1e2a3a;color:#64748b;padding:3px 6px;border-radius:6px;font-size:11px;font-family:inherit;cursor:pointer;outline:none">
           <option value="date_desc"${S.sortBy==='date_desc'?' selected':''}>🕐 Новые</option>
           <option value="date_asc"${S.sortBy==='date_asc'?' selected':''}>🕐 Старые</option>
@@ -1085,12 +1074,8 @@ function render(){
           <option value="amt_asc"${S.sortBy==='amt_asc'?' selected':''}>↓ Сумма</option>
         </select>
       </div>
-      ${S.catFilter?`<div style="display:flex;align-items:center;justify-content:space-between;background:#1e2a3a;border-radius:8px;padding:8px 12px;margin-bottom:10px">
-        <span style="font-size:12px;color:#94a3b8">Показаны: ${getExpCat(S.catFilter).e} ${getExpCat(S.catFilter).n}</span>
-        <button id="clearCatFilter" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:12px;font-family:inherit">✕ Сбросить</button>
-      </div>`:''}
-      ${(()=>{const list=S.catFilter?eData.filter(e=>e.cat===S.catFilter):eData; return list.length===0?`<div class="empty">${S.catFilter?'Нет расходов в этой категории за месяц':'Нет расходов.<br>Добавь вручную или импортируй CSV.'}</div>`:'';})()}
-      ${sortEntries(S.catFilter?eData.filter(e=>e.cat===S.catFilter):eData).map(item=>{
+      ${eData.length===0?`<div class="empty">Нет расходов.<br>Добавь вручную или импортируй CSV.</div>`:
+        sortEntries(eData).map(item=>{
           const c=getExpCat(item.cat);
           const isEdit=S.editEntry?.fid===item.fid&&S.editEntry?.type==='exp';
           if(isEdit){
@@ -1101,7 +1086,6 @@ function render(){
                 </select>
                 <select class="inp edit-wallet-sel" data-fid="${item.fid}" style="flex:1">
                   ${S.wallets.map(w=>`<option value="${w.id}"${w.id===S.editEntry.walletId?' selected':''}>${w.e} ${w.n}</option>`).join('')}
-                  <option value="unassigned"${S.editEntry.walletId==='unassigned'?' selected':''}>❓ Без кошелька</option>
                 </select>
               </div>
               <div style="display:flex;gap:8px">
@@ -1114,10 +1098,10 @@ function render(){
               </div>
             </div>`;
           }
-          const iw=getWallet(item.walletId||'unassigned');
+          const iw=getWallet(item.walletId||'cash');
           return`<div class="entry-wrap">
             <div class="swipe-del-action" data-del-fid="${item.fid}" data-del-type="exp">🗑️</div>
-            <div class="entry entry-tap" data-open-edit="${item.fid}" data-open-type="exp" data-open-cat="${item.cat}" data-open-amt="${item.amt}" data-open-note="${(item.note||'').replace(/"/g,'&quot;')}" data-open-wallet="${item.walletId||'unassigned'}">
+            <div class="entry entry-tap" data-open-edit="${item.fid}" data-open-type="exp" data-open-cat="${item.cat}" data-open-amt="${item.amt}" data-open-note="${(item.note||'').replace(/"/g,'&quot;')}" data-open-wallet="${item.walletId||'cash'}">
               <div style="display:flex;align-items:center;gap:10px;flex:1">
                 <div class="dot" style="background:${c.c}"></div>
                 <div>
@@ -1172,7 +1156,6 @@ function render(){
                 </select>
                 <select class="inp edit-wallet-sel" data-fid="${item.fid}" style="flex:1">
                   ${S.wallets.map(w=>`<option value="${w.id}"${w.id===S.editEntry.walletId?' selected':''}>${w.e} ${w.n}</option>`).join('')}
-                  <option value="unassigned"${S.editEntry.walletId==='unassigned'?' selected':''}>❓ Без кошелька</option>
                 </select>
               </div>
               <div style="display:flex;gap:8px">
@@ -1185,10 +1168,10 @@ function render(){
               </div>
             </div>`;
           }
-          const iw=getWallet(item.walletId||'unassigned');
+          const iw=getWallet(item.walletId||'cash');
           return`<div class="entry-wrap">
             <div class="swipe-del-action" data-del-fid="${item.fid}" data-del-type="inc">🗑️</div>
-            <div class="entry entry-tap" data-open-edit="${item.fid}" data-open-type="inc" data-open-cat="${item.cat}" data-open-amt="${item.amt}" data-open-note="${(item.note||'').replace(/"/g,'&quot;')}" data-open-wallet="${item.walletId||'unassigned'}">
+            <div class="entry entry-tap" data-open-edit="${item.fid}" data-open-type="inc" data-open-cat="${item.cat}" data-open-amt="${item.amt}" data-open-note="${(item.note||'').replace(/"/g,'&quot;')}" data-open-wallet="${item.walletId||'cash'}">
               <div style="display:flex;align-items:center;gap:10px;flex:1">
                 <div class="dot" style="background:${c.c}"></div>
                 <div>
@@ -1235,7 +1218,7 @@ function render(){
     ${S.tab==='csv'?`
       ${S.csv.step==='idle'?`<div class="drop" id="dropZone"><div style="font-size:40px;margin-bottom:12px">📂</div><div style="font-size:15px;color:#94a3b8;margin-bottom:8px">Нажми или перетащи CSV</div><div style="font-size:12px;color:#475569">Kaspi, Halyk и другие банки</div><input type="file" id="fileInp" accept=".csv,.txt" style="display:none"/></div><div class="card"><span class="lbl">ФОРМАТЫ</span><div style="font-size:13px;color:#64748b;line-height:1.9">✅ <b style="color:#94a3b8">Kaspi/Halyk</b> без заголовков<br>✅ <b style="color:#94a3b8">Стандартный CSV</b> с заголовками</div></div>`:''}
       ${S.csv.step==='mapping'?`<div class="card"><span class="lbl">НАСТРОЙКА КОЛОНОК</span><div style="font-size:12px;color:#4ade80;margin-bottom:12px;background:#0f2a1a;padding:8px 12px;border-radius:6px">ℹ️ ${S.csv.info}</div><div class="grid2" style="margin-bottom:14px">${[['amt','💰 Сумма *'],['date','📅 Дата'],['cat','🏷 Категория'],['note','📝 Описание']].map(([f,l])=>`<div><div style="font-size:12px;color:#64748b;margin-bottom:6px">${l}</div><select class="inp csv-map" data-field="${f}"><option value="">— не выбрано —</option>${S.csv.headers.map(h=>`<option value="${h}"${S.csv.map[f]===h?' selected':''}>${h}</option>`).join('')}</select></div>`).join('')}</div><div style="display:flex;gap:10px"><button class="btn2" style="flex:1" id="csvBack">← Назад</button><button class="btn" style="flex:2" id="csvPreviewBtn">Предпросмотр →</button></div></div>`:''}
-      ${S.csv.step==='preview'?`<div class="card"><span class="lbl">ПРЕДПРОСМОТР</span><div style="font-size:12px;color:#4ade80;margin-bottom:12px;background:#0f2a1a;padding:8px 12px;border-radius:6px">✅ ${S.csv.preview.length} записей · ${fmt(S.csv.preview.reduce((s,r)=>s+r.amt,0))} тг</div><div style="max-height:280px;overflow-y:auto;margin-bottom:14px">${S.csv.preview.slice(0,100).map(r=>{const c=getExpCat(r.cat),d=new Date(r.date);return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e2a3a22"><div style="display:flex;gap:8px;align-items:center"><span style="font-size:11px;color:#475569;flex-shrink:0">${d.getDate()}.${String(d.getMonth()+1).padStart(2,'0')}</span><span style="font-size:11px;color:${c.c}">${c.e} ${c.n}</span>${r.note?`<span style="font-size:11px;color:#64748b">${r.note.slice(0,25)}${r.note.length>25?'…':''}</span>`:''}</div><span style="font-weight:700;color:#fbbf24;font-size:12px;flex-shrink:0">${fmt(r.amt)} тг</span></div>`;}).join('')}</div><div style="display:flex;gap:10px"><button class="btn2" style="flex:1" id="csvBack">← Назад</button><button class="btn" style="flex:2;background:linear-gradient(135deg,#f59e0b,#fbbf24)" id="csvImportBtn">✅ Импортировать</button></div></div>`:''}
+      ${S.csv.step==='preview'?`<div class="card"><span class="lbl">ПРЕДПРОСМОТР</span><div style="font-size:12px;color:#4ade80;margin-bottom:12px;background:#0f2a1a;padding:8px 12px;border-radius:6px">✅ ${S.csv.preview.length} записей · ${fmt(S.csv.preview.reduce((s,r)=>s+r.amt,0))} тг</div><div style="max-height:280px;overflow-y:auto;margin-bottom:14px">${S.csv.preview.slice(0,100).map(r=>{const c=getExpCat(r.cat),d=new Date(r.date);return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #1e2a3a22"><div style="display:flex;gap:8px;align-items:center"><span style="font-size:11px;color:#475569;flex-shrink:0">${d.getDate()}.${String(d.getMonth()+1).padStart(2,'0')}</span><span style="font-size:11px;color:${c.c}">${c.e} ${c.n}</span>${r.note?`<span style="font-size:11px;color:#64748b">${r.note.slice(0,25)}${r.note.length>25?'…':''}</span>`:''}</div><span style="font-weight:700;color:#fbbf24;font-size:12px;flex-shrink:0">${fmt(r.amt)} тг</span></div>`;}).join('')}</div><div style="margin-bottom:12px"><div style="font-size:11px;color:#64748b;margin-bottom:6px;letter-spacing:1px">В КАКОЙ КОШЕЛЁК ЗАПИСАТЬ</div><select class="inp" id="csvWallet">${S.wallets.map(w=>`<option value="${w.id}"${w.id===(S.csv.wallet||S.wallets[0]?.id)?' selected':''}>${w.e} ${w.n} (${w.currency})</option>`).join('')}</select></div><div style="display:flex;gap:10px"><button class="btn2" style="flex:1" id="csvBack">← Назад</button><button class="btn" style="flex:2;background:linear-gradient(135deg,#f59e0b,#fbbf24)" id="csvImportBtn">✅ Импортировать</button></div></div>`:''}
       ${S.csv.step==='done'?`<div class="card" style="text-align:center;padding:40px"><div style="font-size:48px;margin-bottom:12px">✅</div><div style="font-size:16px;color:#4ade80;font-weight:700">Сохранено в Firebase!</div></div>`:''}
     `:''}
 
@@ -1262,22 +1245,14 @@ function render(){
   </div>`;
 
   // EVENTS
-  document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>setState({month:+b.dataset.m,catFilter:null}));
+  document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>setState({month:+b.dataset.m}));
   document.querySelectorAll('[data-sort-sel]').forEach(s=>s.onchange=e=>setState({sortBy:e.target.value}));
   const balToggle=document.getElementById('balanceToggle');
   if(balToggle) balToggle.onclick=()=>setState({hideBalance:!S.hideBalance});
-  const prevYear=document.getElementById('prevYear');if(prevYear)prevYear.onclick=()=>setState({year:S.year-1,catFilter:null});
-  const nextYear=document.getElementById('nextYear');if(nextYear)nextYear.onclick=()=>setState({year:S.year+1,catFilter:null});
-  document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>setState({tab:b.dataset.tab,catFilter:null}));
+  const prevYear=document.getElementById('prevYear');if(prevYear)prevYear.onclick=()=>setState({year:S.year-1});
+  const nextYear=document.getElementById('nextYear');if(nextYear)nextYear.onclick=()=>setState({year:S.year+1});
+  document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>setState({tab:b.dataset.tab}));
   document.querySelectorAll('.del-btn').forEach(b=>b.onclick=()=>{if(b.dataset.type==='exp')delExpense(b.dataset.fid);else delIncome(b.dataset.fid);});
-
-  // QUICK ADD
-  const quickAddBtn=document.getElementById('quickAddBtn');
-  const quickAddInp=document.getElementById('quickAddInp');
-  if(quickAddBtn&&quickAddInp){
-    quickAddBtn.onclick=()=>quickAdd();
-    quickAddInp.onkeydown=e=>{if(e.key==='Enter')quickAdd();};
-  }
 
   // Expense form
   const addExpBtn=document.getElementById('addExpBtn');
@@ -1316,6 +1291,8 @@ function render(){
   document.querySelectorAll('.csv-map').forEach(sel=>sel.onchange=e=>setState({csv:{...S.csv,map:{...S.csv.map,[sel.dataset.field]:e.target.value}}}));
   const csvBack=document.getElementById('csvBack');if(csvBack)csvBack.onclick=()=>setState({csv:{...S.csv,step:S.csv.headers.length?'mapping':'idle'}});
   const csvPreviewBtn=document.getElementById('csvPreviewBtn');if(csvPreviewBtn)csvPreviewBtn.onclick=()=>{if(S.csv.map.amt)buildPreview();};
+  const csvWalletSel=document.getElementById('csvWallet');
+  if(csvWalletSel)csvWalletSel.onchange=e=>setState({csv:{...S.csv,wallet:e.target.value}});
   const csvImportBtn=document.getElementById('csvImportBtn');if(csvImportBtn)csvImportBtn.onclick=importCSV;
 
   // ENTRY EDIT EVENTS
@@ -1323,7 +1300,7 @@ function render(){
     el.onclick=function(e){
       if(e.target.classList.contains('del-btn')||e.target.closest('.del-btn')) return;
       if(el.dataset.swiped==='1'){el.dataset.swiped='0';return;}
-      setState({editEntry:{fid:el.dataset.openEdit,type:el.dataset.openType,cat:el.dataset.openCat,amt:Number(el.dataset.openAmt),note:el.dataset.openNote||'',walletId:el.dataset.openWallet||'unassigned'}});
+      setState({editEntry:{fid:el.dataset.openEdit,type:el.dataset.openType,cat:el.dataset.openCat,amt:Number(el.dataset.openAmt),note:el.dataset.openNote||'',walletId:el.dataset.openWallet||'cash'}});
     };
   });
   document.querySelectorAll('[data-cancel-entry]').forEach(b=>b.onclick=e=>{e.stopPropagation();setState({editEntry:null});});
@@ -1339,13 +1316,11 @@ function render(){
   document.querySelectorAll('.edit-cat-sel').forEach(sel=>sel.onchange=e=>{e.stopPropagation();setState({editEntry:{...S.editEntry,cat:e.target.value}});});
   document.querySelectorAll('.edit-wallet-sel').forEach(sel=>sel.onchange=e=>{e.stopPropagation();setState({editEntry:{...S.editEntry,walletId:e.target.value}});});
 
-  // CATEGORY FILTER (click a category card to filter records list)
-  document.querySelectorAll('.cat-filter-card').forEach(el=>el.onclick=()=>{
-    const cat=el.dataset.catFilter;
-    setState({catFilter:S.catFilter===cat?null:cat});
+  // BUDGETS
+  document.querySelectorAll('.budget-inp').forEach(inp=>{
+    inp.onchange=e=>setBudget(inp.dataset.cat, Number(e.target.value)||0);
+    inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();};
   });
-  const clearCatFilter=document.getElementById('clearCatFilter');
-  if(clearCatFilter) clearCatFilter.onclick=()=>setState({catFilter:null});
 
   // SEARCH
   const searchInp=document.getElementById('searchInp');
@@ -1382,18 +1357,6 @@ function render(){
     else if(type==='inc') delIncome(fid);
   });
 
-  // WALLET RECONCILE
-  document.querySelectorAll('.reconcile-btn').forEach(b=>b.onclick=()=>{
-    const id=b.dataset.reconcile;
-    setState({reconcileWalletId:S.reconcileWalletId===id?null:id});
-  });
-  const reconcileInp=document.getElementById('reconcileInp');
-  if(reconcileInp){
-    reconcileInp.focus();
-    reconcileInp.onkeydown=e=>{if(e.key==='Enter')reconcileWallet(S.reconcileWalletId);};
-  }
-  document.querySelectorAll('[data-reconcile-save]').forEach(b=>b.onclick=()=>reconcileWallet(b.dataset.reconcileSave));
-
   // WALLETS TAB EVENTS
   document.querySelectorAll('.rate-inp').forEach(inp=>inp.onchange=e=>{
     const rates={...S.exchangeRates,[inp.dataset.currency]:Number(e.target.value)||0};
@@ -1424,8 +1387,8 @@ function render(){
       const e=document.getElementById('nw-emoji')?.value||'💰';
       const n=document.getElementById('nw-name')?.value||'';
       const currency=document.getElementById('nw-currency')?.value||'KZT';
-      const startBalance=document.getElementById('nw-startbalance')?.value||'';
-      setState({walletSettings:{...S.walletSettings,newWallet:{...S.walletSettings.newWallet,e,n,currency,startBalance}}});
+      const initialBalance=document.getElementById('nw-init')?.value||'';
+      setState({walletSettings:{...S.walletSettings,newWallet:{...S.walletSettings.newWallet,e,n,currency,initialBalance}}});
       setTimeout(addWallet,0);
     };
     const nwName=document.getElementById('nw-name');
@@ -1449,8 +1412,8 @@ function render(){
     const e=document.getElementById('ew-emoji')?.value||S.walletSettings.editWallet.e;
     const n=document.getElementById('ew-name')?.value||S.walletSettings.editWallet.n;
     const currency=document.getElementById('ew-currency')?.value||S.walletSettings.editWallet.currency;
-    const startBalance=Number(document.getElementById('ew-startbalance')?.value)||0;
-    updateWallet({...S.walletSettings.editWallet,e,n,currency,startBalance});
+    const initialBalance=Number(document.getElementById('ew-init')?.value)||0;
+    updateWallet({...S.walletSettings.editWallet,e,n,currency,initialBalance});
   });
 
   // SETTINGS EVENTS
